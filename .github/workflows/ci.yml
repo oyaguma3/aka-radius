@@ -26,7 +26,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.work
+          go-version-file: go.mod
           cache: true
 
       - name: Format
@@ -49,7 +49,6 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
-          args: ./pkg/... ./apps/auth-server/... ./apps/acct-server/... ./apps/vector-gateway/... ./apps/vector-api/... ./apps/provisioning-api/... ./apps/admin-tui/...
 
       - name: Test
         run: make test-race
@@ -63,21 +62,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # auth・acct・admin・gateway は同じイメージ（サブコマンドで切り替える）
       - name: イメージのビルド
         run: |
-          for app in auth-server acct-server vector-gateway vector-api provisioning-api; do
-            echo "::group::$app"
-            docker build -f "apps/$app/Dockerfile" -t "aka-radius-$app:ci" .
-            echo "::endgroup::"
-          done
+          docker build -t aka-radius:ci .
+          # サブコマンドなしでは使い方を出して終了コード 2 で終わる
+          set +e
+          docker run --rm aka-radius:ci
+          code=$?
+          set -e
+          test "$code" -eq 2
 
       - name: compose の設定
         working-directory: deployments
         run: |
           cp .env.example .env
           docker compose -f docker-compose.yml config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile provisioning config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile provisioning config --services
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile admin config -q
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile admin config --services
           # VALKEY_PASSWORD が空なら、compose が断る。
           sed -i 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=|' .env
           ! docker compose -f docker-compose.yml config -q 2>/dev/null

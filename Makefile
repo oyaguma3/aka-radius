@@ -1,58 +1,46 @@
-# EAP-AKA RADIUS PoC — Go Workspace 一括操作 Makefile
+# aka-radius — ビルド・試験・静的解析の Makefile
 #
-# Go Workspace (go.work) 環境のため、各モジュールパスを明示的に指定する。
-
-# Go Workspace 内のモジュールパス
-MODULES := ./pkg/... \
-	./apps/auth-server/... \
-	./apps/acct-server/... \
-	./apps/vector-gateway/... \
-	./apps/vector-api/... \
-	./apps/provisioning-api/... \
-	./apps/admin-tui/...
-
-# Go Workspace 内のモジュールのディレクトリ（govulncheck はモジュールごとに実行する）
-MODULE_DIRS := pkg apps/auth-server apps/acct-server apps/vector-gateway apps/vector-api apps/provisioning-api apps/admin-tui
+# 1 つのモジュール（github.com/oyaguma3/aka-radius）なので、./... で全体を扱う。
 
 # govulncheck の版（CI と同じ）
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 .PHONY: build test test-cover test-race fmt vet lint vulncheck clean
 
-## build: 全モジュールをビルド
+## build: 全パッケージをビルド
 build:
-	go build $(MODULES)
+	go build ./...
 
-## test: 全モジュールのテスト実行
+## test: 全パッケージのテスト実行
 test:
-	go test $(MODULES)
+	go test ./...
 
 ## test-cover: カバレッジ付きテスト実行（cover.out を生成）
 test-cover:
-	go test -coverprofile=cover.out $(MODULES)
+	go test -coverprofile=cover.out ./...
 	go tool cover -func=cover.out | tail -1
 
 ## test-race: データ競合検出付きテスト実行
 test-race:
-	go test -race $(MODULES)
+	go test -race ./...
 
 ## fmt: 全ソースコードのフォーマット
 fmt:
 	gofmt -w .
 
-## vet: 全モジュールの静的解析（go vet）
+## vet: 全パッケージの静的解析（go vet）
 vet:
-	go vet $(MODULES)
+	go vet ./...
 
 ## lint: golangci-lint による静的解析
 lint:
-	golangci-lint run $(MODULES)
+	golangci-lint run ./...
 
-## vulncheck: 依存と標準ライブラリの既知の脆弱性の検査（govulncheck。go.work の直下では動かないのでモジュールごと）
+## vulncheck: 依存と標準ライブラリの既知の脆弱性の検査（govulncheck）
 vulncheck:
-	@set -e; for d in $(MODULE_DIRS); do echo "== $$d"; (cd $$d && go run $(GOVULNCHECK) ./...); done
+	go run $(GOVULNCHECK) ./...
 
 ## clean: ビルド成果物・カバレッジファイルの削除
 clean:
 	rm -f cover.out coverage.out
-	go clean $(MODULES)
+	go clean ./...
