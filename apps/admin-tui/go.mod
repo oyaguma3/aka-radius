@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui
+module github.com/oyaguma3/aka-radius/apps/admin-tui
 
 go 1.27.3
 

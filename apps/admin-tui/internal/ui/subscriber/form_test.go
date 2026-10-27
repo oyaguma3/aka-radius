@@ -8,10 +8,10 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gdamore/tcell/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/validation"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/pkg/validation"
 	"github.com/redis/go-redis/v9"
 	"github.com/rivo/tview"
 )

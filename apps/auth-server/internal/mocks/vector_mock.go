@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	vector "github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/vector"
+	vector "github.com/oyaguma3/aka-radius/apps/auth-server/internal/vector"
 	gomock "go.uber.org/mock/gomock"
 )
 

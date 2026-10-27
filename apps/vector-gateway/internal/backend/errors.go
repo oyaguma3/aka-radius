@@ -3,7 +3,7 @@ package backend
 import (
 	"fmt"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/httputil"
+	"github.com/oyaguma3/aka-radius/pkg/httputil"
 )
 
 // BackendNotImplementedError は未実装バックエンドへのアクセスエラーを表す。

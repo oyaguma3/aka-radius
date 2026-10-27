@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui/client"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui/subscriber"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui/client"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui/subscriber"
 	"github.com/rivo/tview"
 )
 

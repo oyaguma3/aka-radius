@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	policy "github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/policy"
+	policy "github.com/oyaguma3/aka-radius/apps/auth-server/internal/policy"
 	gomock "go.uber.org/mock/gomock"
 )
 

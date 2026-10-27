@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/httputil"
+	"github.com/oyaguma3/aka-radius/pkg/httputil"
 )
 
 func TestNewProblemDetail(t *testing.T) {

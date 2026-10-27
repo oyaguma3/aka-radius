@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/config"
 )
 
 func TestNewRegistry(t *testing.T) {

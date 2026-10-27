@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api
+module github.com/oyaguma3/aka-radius/apps/provisioning-api
 
 go 1.27.3
 

@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/validation"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/validation"
 )
 
 // 監査ログ・セッションの一覧の件数の既定値と上限（D-13 §4.1）

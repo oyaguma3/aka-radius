@@ -3,7 +3,7 @@ package aka
 import (
 	"crypto/subtle"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap"
 	eapaka "github.com/oyaguma3/go-eapaka"
 )
 

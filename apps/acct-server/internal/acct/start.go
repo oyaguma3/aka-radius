@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/session"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/session"
 )
 
 // ProcessStart はAcct-Start処理を行う。

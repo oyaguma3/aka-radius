@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/session"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/session"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/store"
 )
 
 func setupProcessor(t *testing.T) (*miniredis.Miniredis, *Processor) {

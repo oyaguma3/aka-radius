@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	acct "github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/acct"
-	radius "github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
+	acct "github.com/oyaguma3/aka-radius/apps/acct-server/internal/acct"
+	radius "github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
 	gomock "go.uber.org/mock/gomock"
 )
 

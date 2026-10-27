@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
 )
 
 // テスト用の認証ベクター（固定値）

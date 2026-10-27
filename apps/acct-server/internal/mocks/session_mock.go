@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	session "github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/session"
+	session "github.com/oyaguma3/aka-radius/apps/acct-server/internal/session"
 	gomock "go.uber.org/mock/gomock"
 )
 

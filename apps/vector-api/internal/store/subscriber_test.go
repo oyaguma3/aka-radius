@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
 )
 
 const testIMSI = "440101234567890"

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
 )
 
 func TestNew_Timeouts(t *testing.T) {

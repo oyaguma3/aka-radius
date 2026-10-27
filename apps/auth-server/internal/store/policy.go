@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/policy"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/policy"
 )
 
 // policyStore はpolicy.PolicyStoreインターフェースの実装。

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/policy"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/policy"
 )
 
 func TestGetPolicy(t *testing.T) {

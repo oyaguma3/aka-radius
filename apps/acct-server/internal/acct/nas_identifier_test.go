@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
 )
 
 // TestProcess_NASIdentifier は Start / Interim / Stop で、src_ip を持つログすべてに nas_identifier が出ること、

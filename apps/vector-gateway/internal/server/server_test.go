@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/backend"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/handler"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/router"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/backend"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/router"
 )
 
 // newTestServer は内部Vector APIをbackendURLに向けたServerを生成する。

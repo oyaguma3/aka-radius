@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 )
 
 // pageIMSIs はページの加入者の IMSI を並べて返す。
