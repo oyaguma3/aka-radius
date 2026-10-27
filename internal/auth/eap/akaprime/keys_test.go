@@ -117,7 +117,7 @@ func TestDeriveCKPrimeIKPrime_ValidInput(t *testing.T) {
 	autn := testAUTN(t)
 	networkName := "WLAN"
 
-	ckPrime, ikPrime, err := DeriveCKPrimeIKPrime(ck, ik, networkName, autn)
+	ckPrime, ikPrime, err := deriveCKPrimeIKPrime(ck, ik, networkName, autn)
 	if err != nil {
 		t.Fatalf("DeriveCKPrimeIKPrime失敗: %v", err)
 	}
@@ -133,12 +133,12 @@ func TestDeriveCKPrimeIKPrime_DifferentNetworkName(t *testing.T) {
 	ck, ik := testCKIK(t)
 	autn := testAUTN(t)
 
-	ckPrime1, ikPrime1, err := DeriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
+	ckPrime1, ikPrime1, err := deriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
 	if err != nil {
 		t.Fatalf("DeriveCKPrimeIKPrime失敗: %v", err)
 	}
 
-	ckPrime2, ikPrime2, err := DeriveCKPrimeIKPrime(ck, ik, "5G:mnc001.mcc001.3gppnetwork.org", autn)
+	ckPrime2, ikPrime2, err := deriveCKPrimeIKPrime(ck, ik, "5G:mnc001.mcc001.3gppnetwork.org", autn)
 	if err != nil {
 		t.Fatalf("DeriveCKPrimeIKPrime失敗: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestDeriveKeys_ValidInput(t *testing.T) {
 	ck, ik := testCKIK(t)
 	autn := testAUTN(t)
 
-	ckPrime, ikPrime, err := DeriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
+	ckPrime, ikPrime, err := deriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
 	if err != nil {
 		t.Fatalf("DeriveCKPrimeIKPrime失敗: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestDeriveKeys_KautLength(t *testing.T) {
 	ck, ik := testCKIK(t)
 	autn := testAUTN(t)
 
-	ckPrime, ikPrime, err := DeriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
+	ckPrime, ikPrime, err := deriveCKPrimeIKPrime(ck, ik, "WLAN", autn)
 	if err != nil {
 		t.Fatalf("DeriveCKPrimeIKPrime失敗: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestDeriveAllKeys_Success(t *testing.T) {
 	identity := "6123456789012345@example.com"
 	networkName := "WLAN"
 
-	km, err := DeriveAllKeys(identity, ck, ik, autn, networkName)
+	km, err := deriveAllKeys(identity, ck, ik, autn, networkName)
 	if err != nil {
 		t.Fatalf("DeriveAllKeys失敗: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestDeriveCKPrimeIKPrime_RFC5448(t *testing.T) {
 			ik := hexDecode(t, v.ik)
 			autn := hexDecode(t, v.autn)
 
-			ckPrime, ikPrime, err := DeriveCKPrimeIKPrime(ck, ik, v.networkName, autn)
+			ckPrime, ikPrime, err := deriveCKPrimeIKPrime(ck, ik, v.networkName, autn)
 			if err != nil {
 				t.Fatalf("Case %d: DeriveCKPrimeIKPrime失敗: %v", i+1, err)
 			}
@@ -291,7 +291,7 @@ func TestDeriveAllKeys_RFC5448(t *testing.T) {
 			ik := hexDecode(t, v.ik)
 			autn := hexDecode(t, v.autn)
 
-			km, err := DeriveAllKeys(v.identity, ck, ik, autn, v.networkName)
+			km, err := deriveAllKeys(v.identity, ck, ik, autn, v.networkName)
 			if err != nil {
 				t.Fatalf("Case %d: DeriveAllKeys失敗: %v", i+1, err)
 			}
@@ -361,7 +361,7 @@ func TestDeriveAllKeys_DeriveCKPrimeIKPrimeError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DeriveAllKeys("test@example.com", tt.ck, tt.ik, tt.autn, tt.networkName)
+			_, err := deriveAllKeys("test@example.com", tt.ck, tt.ik, tt.autn, tt.networkName)
 			if err == nil {
 				t.Error("エラーを期待したがnilが返された")
 			}
@@ -375,12 +375,12 @@ func TestDeriveAllKeys_Deterministic(t *testing.T) {
 	identity := "6123456789012345@example.com"
 	networkName := "WLAN"
 
-	km1, err := DeriveAllKeys(identity, ck, ik, autn, networkName)
+	km1, err := deriveAllKeys(identity, ck, ik, autn, networkName)
 	if err != nil {
 		t.Fatalf("DeriveAllKeys失敗: %v", err)
 	}
 
-	km2, err := DeriveAllKeys(identity, ck, ik, autn, networkName)
+	km2, err := deriveAllKeys(identity, ck, ik, autn, networkName)
 	if err != nil {
 		t.Fatalf("DeriveAllKeys失敗: %v", err)
 	}

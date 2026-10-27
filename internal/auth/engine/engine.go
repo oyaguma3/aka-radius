@@ -13,14 +13,14 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/eap/akaprime"
 	"github.com/oyaguma3/aka-radius/internal/auth/policy"
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
-	"github.com/oyaguma3/aka-radius/internal/auth/vector"
+	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/logging"
 	eapaka "github.com/oyaguma3/go-eapaka"
 )
 
 // EngineImpl はeap.EAPProcessorの実装
 type EngineImpl struct {
-	vectorClient vector.VectorClient
+	vectorClient source.Fetcher
 	ctxStore     session.ContextStore
 	sessStore    session.SessionStore
 	policyStore  policy.PolicyStore
@@ -30,7 +30,7 @@ type EngineImpl struct {
 
 // NewEngine は新しいEAPエンジンを生成する
 func NewEngine(
-	vc vector.VectorClient,
+	vc source.Fetcher,
 	cs session.ContextStore,
 	ss session.SessionStore,
 	ps policy.PolicyStore,
@@ -241,10 +241,12 @@ func (e *EngineImpl) requestVectorAndBuildChallenge(
 ) *eap.Result {
 	maskedIMSI := e.maskIMSI(identity.IMSI)
 
-	// Vector Gateway呼び出し
-	vCtx := vector.WithTraceID(ctx, traceID)
-	vecResp, err := e.vectorClient.GetVector(vCtx, &vector.VectorRequest{
-		IMSI: identity.IMSI,
+	// 取得先から 1 つのベクターを取る（取得先は加入者の source_id。MVP の設計概要 §7.2）
+	vecResp, err := e.vectorClient.Fetch(ctx, &source.Request{
+		IMSI:    identity.IMSI,
+		Method:  methodOf(identity.EAPType),
+		ANID:    e.cfg.NetworkName,
+		TraceID: traceID,
 	})
 	if err != nil {
 		e.logVectorError(err, traceID, maskedIMSI)
@@ -255,19 +257,10 @@ func (e *EngineImpl) requestVectorAndBuildChallenge(
 		}
 	}
 
-	// 鍵導出
+	// 鍵導出（EAP-AKA' では取得先が導出した CK'・IK' から MK 以降を導出する。契約 §6.4）
 	var kAut, msk []byte
 	if identity.IsAKAPrime() {
-		keys, err := akaprime.DeriveAllKeys(identity.Raw, vecResp.CK, vecResp.IK, vecResp.AUTN, e.cfg.NetworkName)
-		if err != nil {
-			slog.Error("AKA'鍵導出失敗",
-				"event_id", "EAP_KEY_DERIVE_ERR",
-				"trace_id", traceID,
-				"imsi", maskedIMSI,
-				"error", err,
-			)
-			return e.buildReject(identifier + 1)
-		}
+		keys := akaprime.DeriveKeys(identity.Raw, vecResp.CK, vecResp.IK)
 		kAut = keys.K_aut
 		msk = keys.MSK
 	} else {
@@ -278,14 +271,15 @@ func (e *EngineImpl) requestVectorAndBuildChallenge(
 
 	// EAPContext更新
 	updates := map[string]any{
-		"stage":    string(eap.StateChallengeSent),
-		"rand":     hex.EncodeToString(vecResp.RAND),
-		"autn":     hex.EncodeToString(vecResp.AUTN),
-		"xres":     hex.EncodeToString(vecResp.XRES),
-		"k_aut":    hex.EncodeToString(kAut),
-		"msk":      hex.EncodeToString(msk),
-		"imsi":     identity.IMSI,
-		"eap_type": identity.EAPType,
+		"stage":     string(eap.StateChallengeSent),
+		"rand":      hex.EncodeToString(vecResp.RAND),
+		"autn":      hex.EncodeToString(vecResp.AUTN),
+		"xres":      hex.EncodeToString(vecResp.XRES),
+		"k_aut":     hex.EncodeToString(kAut),
+		"msk":       hex.EncodeToString(msk),
+		"imsi":      identity.IMSI,
+		"eap_type":  identity.EAPType,
+		"source_id": vecResp.SourceID,
 	}
 	if err := e.ctxStore.Update(ctx, traceID, updates); err != nil {
 		slog.Error("EAPコンテキスト更新失敗",
@@ -317,6 +311,7 @@ func (e *EngineImpl) requestVectorAndBuildChallenge(
 		"trace_id", traceID,
 		"imsi", maskedIMSI,
 		"eap_type", identity.EAPType,
+		"source_id", vecResp.SourceID,
 	)
 
 	return &eap.Result{
@@ -683,14 +678,23 @@ func (e *EngineImpl) handleResync(ctx context.Context, req *eap.Request, traceID
 		return e.buildReject(pkt.Identifier + 1)
 	}
 
-	// Vector Gateway呼び出し（再同期情報付き）
-	vCtx := vector.WithTraceID(ctx, traceID)
-	vecResp, err := e.vectorClient.GetVector(vCtx, &vector.VectorRequest{
-		IMSI: eapCtx.IMSI,
-		ResyncInfo: &vector.ResyncInfo{
-			RAND: eapCtx.RAND,
-			AUTS: hex.EncodeToString(atAuts.Auts),
-		},
+	// 直前の Challenge の RAND と AUTS で、同じ取得先から取り直す（契約 §8）
+	prevRAND, err := hex.DecodeString(eapCtx.RAND)
+	if err != nil || len(prevRAND) != 16 {
+		slog.Error("EAPコンテキストのRANDが不正",
+			"event_id", "EAP_CTX_INVALID",
+			"trace_id", traceID,
+			"imsi", maskedIMSI,
+		)
+		return e.buildReject(pkt.Identifier + 1)
+	}
+	vecResp, err := e.vectorClient.Fetch(ctx, &source.Request{
+		IMSI:     eapCtx.IMSI,
+		SourceID: eapCtx.SourceID,
+		Method:   methodOf(eapCtx.EAPType),
+		ANID:     e.cfg.NetworkName,
+		Resync:   &source.Resync{RAND: prevRAND, AUTS: atAuts.Auts},
+		TraceID:  traceID,
 	})
 	if err != nil {
 		e.logVectorError(err, traceID, maskedIMSI)
@@ -716,16 +720,7 @@ func (e *EngineImpl) handleResync(ctx context.Context, req *eap.Request, traceID
 	// 新しい鍵導出
 	var kAut, msk []byte
 	if identity.IsAKAPrime() {
-		keys, err := akaprime.DeriveAllKeys(identity.Raw, vecResp.CK, vecResp.IK, vecResp.AUTN, e.cfg.NetworkName)
-		if err != nil {
-			slog.Error("AKA'鍵導出失敗（再同期）",
-				"event_id", "EAP_KEY_DERIVE_ERR",
-				"trace_id", traceID,
-				"imsi", maskedIMSI,
-				"error", err,
-			)
-			return e.buildReject(pkt.Identifier + 1)
-		}
+		keys := akaprime.DeriveKeys(identity.Raw, vecResp.CK, vecResp.IK)
 		kAut = keys.K_aut
 		msk = keys.MSK
 	} else {
@@ -742,6 +737,7 @@ func (e *EngineImpl) handleResync(ctx context.Context, req *eap.Request, traceID
 		"xres":         hex.EncodeToString(vecResp.XRES),
 		"k_aut":        hex.EncodeToString(kAut),
 		"msk":          hex.EncodeToString(msk),
+		"source_id":    vecResp.SourceID,
 		"resync_count": eapCtx.ResyncCount + 1,
 	}
 	if err := e.ctxStore.Update(ctx, traceID, updates); err != nil {
@@ -774,6 +770,7 @@ func (e *EngineImpl) handleResync(ctx context.Context, req *eap.Request, traceID
 		"trace_id", traceID,
 		"imsi", maskedIMSI,
 		"resync_count", eapCtx.ResyncCount+1,
+		"source_id", vecResp.SourceID,
 	)
 
 	return &eap.Result{
@@ -784,50 +781,68 @@ func (e *EngineImpl) handleResync(ctx context.Context, req *eap.Request, traceID
 	}
 }
 
-// logVectorError はVectorエラーをログに記録する
+// methodOf は EAP の Type から取得先に要求する認証の方式を返す。
+func methodOf(eapType uint8) source.Method {
+	if eapType == eapaka.TypeAKAPrime {
+		return source.MethodAKAPrime
+	}
+	return source.MethodAKA
+}
+
+// logVectorError は認証ベクターの取得の誤りをログに記録する（契約 §9.3、MVP の設計概要 §13）。
+// どの誤りでも、その認証は EAP-Failure の Access-Reject で拒否する。
 func (e *EngineImpl) logVectorError(err error, traceID, maskedIMSI string) {
-	var apiErr *vector.APIError
-	if errors.As(err, &apiErr) {
-		eventID := "VECTOR_API_ERR"
-		if apiErr.IsNotFound() {
-			eventID = "VECTOR_IMSI_NOT_FOUND"
-		}
-		slog.Error("Vector APIエラー",
-			"event_id", eventID,
+	var se *source.Error
+	if !errors.As(err, &se) {
+		slog.Error("認証ベクターの取得の不明な誤り",
+			"event_id", "VECTOR_UNKNOWN_ERR",
 			"trace_id", traceID,
 			"imsi", maskedIMSI,
-			"http_status", apiErr.StatusCode,
-			"error", apiErr.Error(),
+			"error", err,
 		)
 		return
 	}
-
-	var connErr *vector.ConnectionError
-	if errors.As(err, &connErr) {
-		slog.Error("Vector接続エラー",
-			"event_id", "VECTOR_CONN_ERR",
-			"trace_id", traceID,
-			"imsi", maskedIMSI,
-			"error", connErr.Error(),
-		)
-		return
-	}
-
-	if errors.Is(err, vector.ErrCircuitOpen) {
-		slog.Error("Circuit Breaker Open",
-			"event_id", "VECTOR_CB_OPEN",
-			"trace_id", traceID,
-			"imsi", maskedIMSI,
-		)
-		return
-	}
-
-	slog.Error("Vector不明エラー",
-		"event_id", "VECTOR_UNKNOWN_ERR",
+	attrs := []any{
 		"trace_id", traceID,
 		"imsi", maskedIMSI,
-		"error", err.Error(),
-	)
+		"source_id", se.SourceID,
+	}
+	if se.Status != 0 {
+		attrs = append(attrs, "http_status", se.Status)
+	}
+	if se.Cause != "" {
+		attrs = append(attrs, "cause", se.Cause)
+	}
+	if se.Reason != "" {
+		attrs = append(attrs, "reason", se.Reason)
+	}
+	if se.LatencyMs != 0 {
+		attrs = append(attrs, "latency_ms", se.LatencyMs)
+	}
+	if se.Err != nil {
+		attrs = append(attrs, "error", se.Err.Error())
+	}
+	switch se.Kind {
+	case source.KindRejected:
+		// 403 は加入者による一般的な拒否。400・501 は設定の食い違い（許していない anId など）なので目立たせる
+		if se.Status == 403 {
+			slog.Warn("取得先が拒否した", append([]any{"event_id", "VECTOR_REJECTED"}, attrs...)...)
+		} else {
+			slog.Error("取得先が拒否した（設定の食い違い）", append([]any{"event_id", "VECTOR_REJECTED"}, attrs...)...)
+		}
+	case source.KindTemporary:
+		slog.Error("取得先の一時的な誤り", append([]any{"event_id", "VECTOR_TEMPORARY_ERR"}, attrs...)...)
+	case source.KindContractViolation:
+		slog.Error("取得先の応答が契約に合わない", append([]any{"event_id", "VECTOR_CONTRACT_VIOLATION"}, attrs...)...)
+	case source.KindCircuitOpen:
+		slog.Error("取得先の遮断器が開いている", append([]any{"event_id", "VECTOR_CIRCUIT_OPEN"}, attrs...)...)
+	case source.KindSourceUnknown:
+		slog.Warn("加入者の取得先が決まらない", append([]any{"event_id", "VECTOR_SOURCE_UNKNOWN"}, attrs...)...)
+	case source.KindLookupFailed:
+		slog.Error("加入者の取得先を読めない", append([]any{"event_id", "VECTOR_SOURCE_LOOKUP_ERR"}, attrs...)...)
+	default:
+		slog.Error("認証ベクターの取得の不明な誤り", append([]any{"event_id", "VECTOR_UNKNOWN_ERR"}, attrs...)...)
+	}
 }
 
 // buildReject はEAP-Failure付きReject結果を生成する

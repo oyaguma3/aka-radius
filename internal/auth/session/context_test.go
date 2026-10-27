@@ -16,9 +16,8 @@ import (
 func newTestValkeyClient(t *testing.T, mr *miniredis.Miniredis) *store.ValkeyClient {
 	t.Helper()
 	cfg := &config.Config{
-		Common:       envconf.Common{ValkeyHost: mr.Host(), ValkeyPort: mr.Port(), ValkeyPassword: ""},
-		VectorAPIURL: "http://localhost:8080",
-		NetworkName:  "WLAN",
+		Common:      envconf.Common{ValkeyHost: mr.Host(), ValkeyPort: mr.Port(), ValkeyPassword: ""},
+		NetworkName: "WLAN",
 	}
 	vc, err := store.NewValkeyClient(cfg)
 	if err != nil {

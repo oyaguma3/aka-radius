@@ -10,7 +10,6 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/acct"
 	"github.com/oyaguma3/aka-radius/internal/admin"
 	"github.com/oyaguma3/aka-radius/internal/auth"
-	"github.com/oyaguma3/aka-radius/internal/gateway"
 )
 
 // build はビルドの版（git のコミットなど）。起動ログの build に出す。
@@ -19,10 +18,9 @@ var build = "dev"
 
 // subcommands はサブコマンドと、その入口。
 var subcommands = map[string]func(build string){
-	"auth":    auth.Main,
-	"acct":    acct.Main,
-	"admin":   admin.Main,
-	"gateway": gateway.Main,
+	"auth":  auth.Main,
+	"acct":  acct.Main,
+	"admin": admin.Main,
 }
 
 const usage = `使い方: aka-radius <サブコマンド>
@@ -31,7 +29,6 @@ const usage = `使い方: aka-radius <サブコマンド>
   auth      RADIUS 認証サーバー（1812/udp。EAP-AKA / EAP-AKA'）
   acct      RADIUS Accounting サーバー（1813/udp）
   admin     管理API（9444/tcp、mTLS）
-  gateway   Vector Gateway（8080/tcp。段階 2-2 で auth に取り込んでなくす）
 
 設定は環境変数で渡す（README を参照）。
 `

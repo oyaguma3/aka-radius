@@ -1,18 +1,17 @@
 # =============================================================================
-# aka-only-server を同一ホストで動かす場合のオーバーレイ
+# 取得先（aka-vecgen）を同一ホストで動かす場合のオーバーレイ
 # =============================================================================
-# aka-only-server の compose が作る共有ネットワーク（既定名 aka-av）に
-# gateway だけを参加させる（段階 2-2 で auth に移す）。共有ネットワークは aka-only-server 側が作るので、
-# 先に aka-only-server を起動しておくこと。
+# aka-vecgen の compose が作る共有ネットワーク（既定名 aka-av）に
+# auth だけを参加させる。共有ネットワークは aka-vecgen 側が作るので、
+# 先に aka-vecgen を起動しておくこと。
 #
 #   docker compose -f docker-compose.yml -f docker-compose.aka-av.yml up -d
 #
-# 参加後は https://aka-only-server:8443（平文なら http://aka-only-server:8080）で届く。
-# 別ホストの aka-only-server に接続する場合は、このファイルを重ねずに
-# VECTOR_GATEWAY_AKAONLY_URL を相手ホストのアドレスにする。
+# 参加後は https://aka-vecgen:8443 で届く（登録簿の baseUrl は https://aka-vecgen:8443/nudm-ueau/v1）。
+# 別ホストの取得先に接続する場合は、このファイルを重ねずに、登録簿の baseUrl を相手ホストのアドレスにする。
 # =============================================================================
 services:
-  gateway:
+  auth:
     networks:
       - default
       - aka-av

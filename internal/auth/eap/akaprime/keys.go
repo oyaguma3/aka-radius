@@ -13,12 +13,7 @@ type KeyMaterial struct {
 	EMSK   []byte // 64バイト: 拡張マスターセッション鍵
 }
 
-// DeriveCKPrimeIKPrime はCK'/IK'を導出する（RFC 9048 Section 3.3）
-func DeriveCKPrimeIKPrime(ck, ik []byte, networkName string, autn []byte) (ckPrime, ikPrime []byte, err error) {
-	return eapaka.DeriveCKPrimeIKPrime(ck, ik, networkName, autn)
-}
-
-// DeriveKeys はEAP-AKA'セッション鍵導出を行う
+// DeriveKeys はEAP-AKA'セッション鍵導出を行う（CK'・IK' は取得先が導出して返す。契約 §6.4）
 // eapaka.DeriveKeysAKAPrime のラッパー
 func DeriveKeys(identity string, ckPrime, ikPrime []byte) *KeyMaterial {
 	keys := eapaka.DeriveKeysAKAPrime(identity, ckPrime, ikPrime)
@@ -29,13 +24,4 @@ func DeriveKeys(identity string, ckPrime, ikPrime []byte) *KeyMaterial {
 		MSK:    keys.MSK,
 		EMSK:   keys.EMSK,
 	}
-}
-
-// DeriveAllKeys はCK'/IK'導出とセッション鍵導出を統合的に行う
-func DeriveAllKeys(identity string, ck, ik, autn []byte, networkName string) (*KeyMaterial, error) {
-	ckPrime, ikPrime, err := DeriveCKPrimeIKPrime(ck, ik, networkName, autn)
-	if err != nil {
-		return nil, err
-	}
-	return DeriveKeys(identity, ckPrime, ikPrime), nil
 }

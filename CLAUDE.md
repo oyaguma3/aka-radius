@@ -2,7 +2,8 @@
 
 ## 概要
 - MVP セット（aka-mvpset）の RADIUS サーバーのノード。eapaka-radius-server-poc の履歴を引き継ぎ、MVP セットの段階 1 で名前（module パス `github.com/oyaguma3/aka-radius`）を変えた。MVP の改修は `docs/design-overview.md`（MVP の設計概要）の §17.1 の手順（2-1〜2-6）で行う。
-- 段階 2-1 は済み: 1 つのモジュールとコマンド `aka-radius`（サブコマンド `auth`・`acct`・`admin`・`gateway`）、vector-api と Admin-TUI の廃止、auth と acct の共通部分（`internal/radiussrv`）、環境変数の接頭辞 `RADIUS_`（`internal/envconf`）、IMSI のマスクの既定 `false`。`gateway` は 2-2 で auth に取り込んでなくす（それまでは Gin と envconfig と PoC の環境変数の名前のまま）。admin の Gin は 2-3 で外す。
+- 段階 2-1 は済み: 1 つのモジュールとコマンド `aka-radius`（サブコマンド `auth`・`acct`・`admin`）、vector-api と Admin-TUI の廃止、auth と acct の共通部分（`internal/radiussrv`）、環境変数の接頭辞 `RADIUS_`（`internal/envconf`）、IMSI のマスクの既定 `false`。admin の Gin は 2-3 で外す。
+- 段階 2-2 は済み: vector-gateway を auth に取り込んだ（`internal/auth/source`。取得先の登録簿 `RADIUS_SOURCES_FILE` を `SIGHUP` で読み直す、取得先ごとの mTLS の接続と遮断器、契約 R1〜R7、再同期は 1 回まで）。取得先は `sub:{imsi}` の `source_id`（2-3 で加入者の口を作るまでは Valkey に直接入れる）。登録簿と証明書は `deployments/sources/` をディレクトリごとマウントする。結合試験は `internal/auth/integration_test.go`（偽の取得先は `internal/auth/source/sourcetest`）。
 - D-文書は 2-6 でまとめて改版する。それまでは設計概要を正とし、D-文書に残る PoC の名前と作り（`apps/`、`pkg/`、`go.work`、Admin-TUI、vector-api など）は読み替える。
 EAP-AKA/AKA' の RADIUS サーバー。Wi-Fi認証（WPA2/WPA3-Enterprise）向け。RADIUS認証機能・課金機能と管理API を持つ。
 

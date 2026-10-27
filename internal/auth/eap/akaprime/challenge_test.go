@@ -27,7 +27,7 @@ func setupAKAPrimeChallengeTest(t *testing.T) (kAut []byte, rand, autn, xres []b
 		autn[i] = byte(i + 100)
 	}
 
-	km, err := DeriveAllKeys(identity, ck, ik, autn, testNetworkName)
+	km, err := deriveAllKeys(identity, ck, ik, autn, testNetworkName)
 	if err != nil {
 		t.Fatalf("DeriveAllKeys失敗: %v", err)
 	}

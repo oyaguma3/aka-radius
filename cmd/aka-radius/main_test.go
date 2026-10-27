@@ -7,7 +7,7 @@ import (
 )
 
 func TestLookup(t *testing.T) {
-	for _, name := range []string{"auth", "acct", "admin", "gateway"} {
+	for _, name := range []string{"auth", "acct", "admin"} {
 		var buf bytes.Buffer
 		if run, ok := lookup([]string{name}, &buf); !ok || run == nil {
 			t.Errorf("lookup(%q) = %v, want the entry point", name, ok)
@@ -26,7 +26,7 @@ func TestLookup_Errors(t *testing.T) {
 	}{
 		{"引数なし", nil, "使い方"},
 		{"引数が 2 つ", []string{"auth", "acct"}, "使い方"},
-		{"不明なサブコマンド", []string{"vector-api"}, `不明なサブコマンド: "vector-api"`},
+		{"不明なサブコマンド", []string{"gateway"}, `不明なサブコマンド: "gateway"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
