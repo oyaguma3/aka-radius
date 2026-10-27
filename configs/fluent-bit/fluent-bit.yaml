@@ -24,44 +24,33 @@ pipeline:
 
     # ヘルスチェックログをリタグしてアプリ専用ログから除外
     - name: rewrite_tag
-      match: "app.vector-api"
-      rule: $path ^/health$ healthcheck.vector-api false
-      emitter_name: re_emitted_vector_api
-
-    - name: rewrite_tag
-      match: "app.vector-gateway"
-      rule: $path ^/health$ healthcheck.vector-gateway false
-      emitter_name: re_emitted_vector_gw
+      match: "app.gateway"
+      rule: $path ^/health$ healthcheck.gateway false
+      emitter_name: re_emitted_gateway
 
   outputs:
     - name: file
-      match: app.auth-server
+      match: app.auth
       path: /output_logs
-      file: auth-server.log
+      file: auth.log
       format: plain
 
     - name: file
-      match: app.acct-server
+      match: app.acct
       path: /output_logs
-      file: acct-server.log
+      file: acct.log
       format: plain
 
     - name: file
-      match: app.vector-gateway
+      match: app.gateway
       path: /output_logs
-      file: vector-gateway.log
+      file: gateway.log
       format: plain
 
     - name: file
-      match: app.vector-api
+      match: app.admin
       path: /output_logs
-      file: vector-api.log
-      format: plain
-
-    - name: file
-      match: app.provisioning-api
-      path: /output_logs
-      file: provisioning-api.log
+      file: admin.log
       format: plain
 
     - name: file

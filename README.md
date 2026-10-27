@@ -5,30 +5,26 @@
 
 このリポジトリは、VPS に分けて置いて顧客を収容する **MVP セット**（[aka-mvpset](https://github.com/oyaguma3/aka-mvpset)）の RADIUS サーバーのノードです。PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset) の `pocset-v1.0.1`）の [eapaka-radius-server-poc](https://github.com/oyaguma3/eapaka-radius-server-poc) の履歴を引き継いで作りました（もとのコミット `main` の `1f8aad1`、`develop` の `86e05a9`）。
 
-いまは名前（Go の module パス）を変えただけで、作りは eapaka-radius-server-poc と同じです。MVP のための改修（vector-api と Admin-TUI を外して 1 つのモジュールにまとめる、テナントの刻印による認可、状態、利用の集計、管理API 2.0.0 など）は、[設計概要](docs/design-overview.md)のとおりに MVP セットの段階 2 で行います。今の作りの説明は、以下と `docs/` の D-文書にあります（D-文書の中の旧名とネットワーク名 `eapaka-prov` は、段階 2 の改版のときに直します）。
+MVP のための改修は、[設計概要](docs/design-overview.md)のとおりに MVP セットの段階 2 で進めています。いまは段階 2-1 まで済んでいて、7 つの Go モジュールを 1 つのモジュールとコマンド `aka-radius` にまとめ、vector-api と Admin-TUI を外し、環境変数の名前を `RADIUS_` で始まるものに改めました。鍵を持たない取得先のクライアント（2-2）、テナントの刻印による認可・状態（2-3）、利用の集計（2-4）、管理API 2.0.0（2-3〜2-5）はこれからです。`docs/` の D-文書は段階 2-6 でまとめて改版するので、それまでは設計概要と本書を正とします（D-文書には PoC の名前と作りが残っています）。
 
 ## 概要
 
-EAP-AKA/AKA' RADIUS サーバーの PoC (Proof of Concept) 環境です。
-Wi-Fi 認証 (WPA2/WPA3-Enterprise) 向けの RADIUS 認証・課金機能、AKA 認証ベクター生成機能、および管理用 TUI アプリケーションを提供します。
+EAP-AKA/AKA' の RADIUS サーバーです。
+Wi-Fi 認証 (WPA2/WPA3-Enterprise) 向けの RADIUS 認証・課金機能と、管理API を提供します。
 
 ## アーキテクチャ
 
-![アーキテクチャ図](docs/material/architecture.png)
+1 つのイメージ `aka-radius` を、サブコマンドを変えて別々のコンテナで動かします（設計概要 §4）。
 
-> 図には接続方式01の aka-only-server（外部・任意）は含まれていません。
-
-| コンポーネント | 役割 | ポート |
+| サービス（サブコマンド） | 役割 | ポート |
 |---|---|---|
-| **auth-server** | RADIUS 認証 + EAP-AKA/AKA' ステートマシン制御 | UDP 1812 |
-| **acct-server** | RADIUS 課金 (Accounting) | UDP 1813 |
-| **vector-gateway** | 認証ベクター生成リクエストのルーティング（PLMN 単位で接続方式 00: vector-api / 01: aka-only-server に振り分け） | HTTP 8080（コンテナ内のみ） |
-| **vector-api** | Milenage アルゴリズム計算 + SQN 管理 | HTTP 8080（コンテナ内のみ） |
-| **admin-tui** | 加入者・セッション管理用ターミナル UI | - |
-| **provisioning-api**（任意） | 加入者・RADIUSクライアント・認可ポリシーの REST API（`/admin/v1`。監査ログ・セッションの参照も）。本PoCの外の BFF から mTLS で操作する。compose の profile `provisioning` で起動 | HTTPS 9444（既定 127.0.0.1 のみ） |
+| **auth** | RADIUS 認証 + EAP-AKA/AKA' ステートマシン制御 | UDP 1812 |
+| **acct** | RADIUS 課金 (Accounting) | UDP 1813 |
+| **gateway** | 認証ベクターの取得先への振り分け（PLMN 単位で接続方式 01: aka-only-server に振り分け）。段階 2-2 で auth に取り込んでなくす。内部の取得先（接続方式 00: vector-api）は段階 2-1 で外した | HTTP 8080（コンテナ内のみ） |
+| **admin**（任意） | 管理API（本PoC の Provisioning API。`/admin/v1`。加入者・RADIUSクライアント・認可ポリシー、監査ログ・セッションの参照）。aka-provisioner から mTLS で操作する。compose の profile `admin` で起動 | HTTPS 9444（既定 127.0.0.1 のみ） |
 | **valkey** | データストア (加入者情報・セッション等) | 6379（127.0.0.1 のみ） |
 | **fluent-bit** | ログ収集・転送 | 24224（127.0.0.1 のみ） |
-| **aka-only-server**（外部・任意） | 接続方式01。指定 PLMN の AKA 認証ベクターを払い出す外部サーバー（3GPP TS 29.503 Nudm_UEAU GenerateAv ベース、[aka-only-server](https://github.com/oyaguma3/aka-only-server)）。mTLS で接続 | HTTPS 8443（平文 HTTP 8080） |
+| **aka-only-server**（外部・任意） | 接続方式01。指定 PLMN の AKA 認証ベクターを払い出す外部サーバー（3GPP TS 29.503 Nudm_UEAU GenerateAv ベース。MVP では [aka-vecgen](https://github.com/oyaguma3/aka-vecgen)）。mTLS で接続 | HTTPS 8443 |
 
 ## 技術スタック
 
@@ -45,20 +41,20 @@ Wi-Fi 認証 (WPA2/WPA3-Enterprise) 向けの RADIUS 認証・課金機能、AKA
 
 ```
 aka-radius/
-├── apps/
-│   ├── auth-server/        # RADIUS 認証サーバー
-│   ├── acct-server/        # RADIUS 課金サーバー
-│   ├── vector-gateway/     # ベクター生成ルーティング
-│   ├── vector-api/         # Milenage 計算 + SQN 管理
-│   ├── provisioning-api/   # マスタデータの REST API（任意）
-│   └── admin-tui/          # 管理用 TUI アプリケーション
-├── pkg/                    # 共通ライブラリ
+├── cmd/aka-radius/         # コマンド（サブコマンド auth・acct・admin・gateway の振り分け）
+├── internal/
+│   ├── auth/               # RADIUS 認証サーバー（サブコマンド auth）
+│   ├── acct/               # RADIUS 課金サーバー（サブコマンド acct）
+│   ├── admin/              # 管理API（サブコマンド admin）
+│   ├── gateway/            # Vector Gateway（サブコマンド gateway。段階 2-2 でなくす）
+│   ├── radiussrv/          # auth と acct に共通の RADIUS の受け口（待ち受け、共有シークレット、Message-Authenticator、Proxy-State、Status-Server）
+│   ├── envconf/            # 環境変数の読み込み（Valkey とログの共通の設定）
 │   ├── apperr/             # エラー定義
 │   ├── httputil/           # HTTP ユーティリティ
 │   ├── logging/            # ログ設定
 │   ├── model/              # 共通モデル
-│   ├── validation/         # マスタデータの入力検証（Admin TUI / Provisioning API 共通）
-│   ├── masterdata/         # マスタデータの Valkey アクセス（同上）
+│   ├── validation/         # マスタデータの入力検証
+│   ├── masterdata/         # マスタデータの Valkey アクセス
 │   └── valkey/             # Valkey クライアント
 ├── configs/
 │   └── fluent-bit/         # Fluent Bit 設定 (YAML)
@@ -68,9 +64,9 @@ aka-radius/
 │   ├── .env.example        # 環境変数テンプレート
 │   ├── certs/              # aka-only-server 接続用証明書の配置先（中身は .gitignore 対象）
 │   └── lnav_formats/       # lnav ログフォーマット定義
-├── docs/                   # 設計・運用ドキュメント (全29件とドキュメント一覧)
-├── go.work                 # Go Workspace 定義
-└── go.work.sum
+├── docs/                   # MVP の設計概要と、PoC の設計・運用ドキュメント（D-文書など）
+├── Dockerfile              # イメージ aka-radius
+└── go.mod
 ```
 
 ## セットアップ
@@ -96,60 +92,65 @@ cp .env.example .env
 docker compose up -d
 ```
 
-本番相当の環境へのデプロイ手順は、ミニPC（LAN 内）なら B-01 / B-02、VPS（AWS Lightsail 等。インターネットに公開）なら B-03 を参照してください。インターネットに公開する場合は、`RADIUS_SECRET` を空のままにし、クラウド側のファイアウォールで RADIUS（1812/1813/udp）の送信元を AP のIPに限ってください。
+インターネットに公開する場合は、`RADIUS_FALLBACK_SECRET` を空のままにし、ファイアウォールで RADIUS（1812/1813/udp）の送信元をエッジのアドレスに限ってください。
 
 ### 主要な環境変数
 
+compose の `.env` に書く変数です。アプリが読む環境変数（`RADIUS_VALKEY_HOST` など）は、compose がこれらから組み立てて渡します。
+
 | 変数名 | 必須 | 説明 |
 |---|---|---|
-| `VALKEY_PASSWORD` | Yes | Valkey 接続パスワード |
-| `RADIUS_SECRET` | No | フォールバックの RADIUS 共有シークレット。設定すると、クライアント登録（送信元IP）のない送信元からのパケットもこの値で受け付ける。インターネットに公開する場合は空のままにする |
-| `VECTOR_GATEWAY_MODE` | No | 動作モード (`gateway` / `passthrough`) |
-| `VECTOR_GATEWAY_PLMN_MAP` | No | PLMN と接続方式 ID の対応 (例: `44010:01`。未一致 PLMN は `00` = 内部 vector-api) |
-| `VECTOR_GATEWAY_INTERNAL_TIMEOUT` | No | 内部 vector-api 呼び出しタイムアウト (デフォルト: `3s`。auth-server のタイムアウト 5 秒より短くすること) |
-| `VECTOR_GATEWAY_AKAONLY_URL` | No | aka-only-server のベース URL (空なら接続方式01は無効。`https://` で mTLS、`http://` で平文) |
-| `VECTOR_GATEWAY_AKAONLY_CLIENT_CERT` / `_CLIENT_KEY` | No | aka-only-server 用クライアント証明書・秘密鍵 (例: `/certs/av-client.pem`。鍵は省略時 CLIENT_CERT から読む) |
-| `VECTOR_GATEWAY_AKAONLY_SERVER_CERT` | No | aka-only-server の AV 用サーバー証明書 (例: `/certs/av-server.pem`) |
-| `VECTOR_GATEWAY_AKAONLY_TIMEOUT` | No | aka-only-server 呼び出しタイムアウト (デフォルト: `3s`。auth-server のタイムアウト 5 秒より短くすること) |
-| `LOG_MASK_IMSI` | No | IMSI マスキング有効化 (デフォルト: `true`) |
-| `LOG_LEVEL` | No | ログレベル (`DEBUG` / `INFO` / `WARN` / `ERROR`、デフォルト: `INFO`。対象: auth-server / acct-server / vector-gateway / vector-api / provisioning-api) |
-| `TEST_VECTOR_ENABLED` | No | テストベクターモード (デフォルト: `false`、本番では無効のこと) |
-| `PROVISIONING_API_ADMIN_CLIENTS` | No | Provisioning API の管理クライアント（`識別名=クライアント証明書のSHA-256フィンガープリント` のカンマ区切り。provisioning-api を使う場合は必須） |
-| `PROVISIONING_API_BIND` | No | Provisioning API の 9444/tcp を公開するアドレス (デフォルト: `127.0.0.1`) |
-| `PROVISIONING_API_NODE_NAME` | No | Provisioning API の `/status` が返すノード名 |
-| `PROVISIONING_API_AUDIT_MAX` | No | Provisioning API の監査ログを Valkey に保持する件数の上限（おおよそ。デフォルト: `10000`。`GET /audit-logs` で参照する） |
-| `PROVISIONING_SHARED_NETWORK` | No | 同じホストの BFF と共有する Docker ネットワークの名前 (デフォルト: `eapaka-prov`) |
+| `VALKEY_PASSWORD` | Yes | Valkey 接続パスワード（アプリには `RADIUS_VALKEY_PASSWORD` として渡す） |
+| `RADIUS_FALLBACK_SECRET` | No | 予備の RADIUS 共有シークレット。設定すると、クライアント登録（送信元IP）のない送信元からのパケットもこの値で受け付ける。インターネットに公開する場合は空のままにする |
+| `RADIUS_EAP_AKA_PRIME_NETWORK_NAME` | No | EAP-AKA' のネットワーク名 (デフォルト: `WLAN`) |
+| `RADIUS_LOG_LEVEL` | No | ログレベル (`DEBUG` / `INFO` / `WARN` / `ERROR`、デフォルト: `INFO`) |
+| `RADIUS_LOG_MASK_IMSI` | No | ログの IMSI をマスクするか (デフォルト: `false`。MVP の決定事項 26) |
+| `RADIUS_ADMIN_CLIENTS` | No | 管理API の管理クライアント（`識別名=クライアント証明書のSHA-256フィンガープリント` のカンマ区切り。admin を使う場合は必須） |
+| `RADIUS_ADMIN_BIND` | No | 管理API の 9444/tcp を公開するアドレス (デフォルト: `127.0.0.1`) |
+| `RADIUS_ADMIN_NODE_NAME` | No | 管理API の `/status` が返すノード名 |
+| `RADIUS_ADMIN_AUDIT_MAX` | No | 管理API の監査ログを Valkey に保持する件数の上限（おおよそ。デフォルト: `10000`。`GET /audit-logs` で参照する） |
+| `PROVISIONING_SHARED_NETWORK` | No | 同じホストの呼び出し側と共有する Docker ネットワークの名前 (デフォルト: `eapaka-prov`。段階 2-5 で決め直す) |
+| `RADIUS_VERSION` | No | イメージのタグと、起動ログの `build` に出すビルドの版 (デフォルト: `dev`) |
+| `VECTOR_GATEWAY_*` | No | gateway の設定（`MODE`、`PLMN_MAP`、`AKAONLY_URL`・`AKAONLY_CLIENT_CERT`・`AKAONLY_CLIENT_KEY`・`AKAONLY_SERVER_CERT`、タイムアウト）。段階 2-2 でなくすので、名前は PoC のまま |
 
 詳細は `deployments/.env.example` を参照してください。
 
+コンテナの中のアプリが読む環境変数は次のとおりです（compose を使わずに動かす場合）。
+
+| サブコマンド | 環境変数 |
+|---|---|
+| 共通（auth・acct・admin） | `RADIUS_VALKEY_HOST`（既定 `valkey`）、`RADIUS_VALKEY_PORT`（既定 `6379`）、`RADIUS_VALKEY_PASSWORD`（必須）、`RADIUS_LOG_LEVEL`、`RADIUS_LOG_MASK_IMSI` |
+| auth | `RADIUS_AUTH_LISTEN_ADDR`（既定 `:1812`）、`RADIUS_FALLBACK_SECRET`、`RADIUS_EAP_AKA_PRIME_NETWORK_NAME`、`VECTOR_API_URL`（必須。gateway の URL。段階 2-2 でなくす） |
+| acct | `RADIUS_ACCT_LISTEN_ADDR`（既定 `:1813`）、`RADIUS_FALLBACK_SECRET` |
+| admin | `RADIUS_ADMIN_LISTEN_ADDR`（既定 `:9444`）、`RADIUS_ADMIN_TLS_CERT`・`RADIUS_ADMIN_TLS_KEY`（必須）、`RADIUS_ADMIN_CLIENTS`（必須）、`RADIUS_ADMIN_NODE_NAME`、`RADIUS_ADMIN_AUDIT_MAX` |
+| gateway | `VECTOR_GATEWAY_*`、`LISTEN_ADDR`、`LOG_LEVEL`、`LOG_MASK_IMSI`（PoC の名前のまま） |
+
 ### aka-only-server への接続（任意）
 
-接続方式01を使う場合は、aka-only-server でクライアント証明書の発行・登録と加入者登録を行い、証明書を `deployments/certs/` に置いて `.env` を設定します。同一ホストの場合は aka-only-server を先に起動し、オーバーレイを重ねて起動します。
+接続方式01を使う場合は、取得先でクライアント証明書の発行・登録と加入者登録を行い、証明書を `deployments/certs/` に置いて `.env` を設定します。同一ホストの場合は取得先を先に起動し、オーバーレイを重ねて起動します。
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.aka-av.yml up -d
 ```
 
-手順の詳細は B-02 アプリケーションデプロイ手順書 §14 を参照してください。
+段階 2-1 の時点の gateway は PoC の作りのままで、認証ベクターAPI の契約（aka-mvpset の `docs/av-api-contract.md`）にはまだ合っていません。契約に合わせた取得先のクライアントは段階 2-2 で作ります。
 
-### Provisioning API（任意）
+### 管理API（任意）
 
-本PoCの外の BFF から加入者・RADIUSクライアント・認可ポリシーを操作する場合は、サーバー証明書を `deployments/certs/provisioning/`（`server.pem` / `server.key`）に置き、BFF のクライアント証明書のフィンガープリントを `.env` の `PROVISIONING_API_ADMIN_CLIENTS` に登録して、profile を指定して起動します。
+aka-provisioner から加入者・RADIUSクライアント・認可ポリシーを操作する場合は、サーバー証明書を `deployments/certs/provisioning/`（`server.pem` / `server.key`）に置き、呼び出し側のクライアント証明書のフィンガープリントを `.env` の `RADIUS_ADMIN_CLIENTS` に登録して、profile を指定して起動します。
 
 ```bash
-docker compose --profile provisioning up -d
+docker compose --profile admin up -d
 ```
 
-同じホストで動かす BFF（[web-gui-for-eapaka-radius](https://github.com/oyaguma3/web-gui-for-eapaka-radius) 等）は、共有の Docker ネットワーク（既定名 `eapaka-prov`）に参加して `https://provisioning-api:9444` で接続します（サーバー証明書の SAN に `DNS:provisioning-api` を入れます）。
+同じホストで動かす呼び出し側は、共有の Docker ネットワーク（既定名 `eapaka-prov`）に参加して `https://provisioning-api:9444` で接続します（admin のサービスに別名 `provisioning-api` を付けています。サーバー証明書の SAN に `DNS:provisioning-api` を入れます）。
 
-API 仕様は `docs/openapi/provisioning-api.yaml`、設計は D-13、手順の詳細は B-02 §15 を参照してください。
+API 仕様は `docs/openapi/provisioning-api.yaml`、設計は D-13 を参照してください（段階 2-3〜2-5 で管理API 2.0.0 に改めます）。
 
 ## テスト実行
 
-Go Workspace (`go.work`) 構成のため、リポジトリ直下で `go test ./...` は使えません。Makefile が各モジュールを指定します。
-
 ```bash
-# 全モジュールのテストを実行
+# 全パッケージのテストを実行
 make test
 
 # データ競合の検出付きで実行（CI と同じ。CGO_ENABLED=1 が必要）
@@ -158,25 +159,9 @@ make test-race
 # カバレッジ付きで実行
 make test-cover
 
-# 特定のアプリケーションのみ
-go test ./apps/auth-server/...
+# 特定のパッケージのみ
+go test ./internal/auth/...
 ```
-
-テスト規模: 134 テストファイル、864 テスト関数、1,531 テストケース (T-02 単体テスト仕様書 §4.1)
-
-## 実装状況
-
-全コンポーネントの実装が完了しています。
-
-| コンポーネント | ステータス |
-|---|---|
-| auth-server | 完了 |
-| acct-server | 完了 |
-| vector-gateway | 完了 |
-| vector-api | 完了 |
-| admin-tui | 完了 |
-| provisioning-api | 完了 |
-| インフラ (Docker Compose / Fluent Bit / Valkey) | 完了 |
 
 ## ドキュメント
 

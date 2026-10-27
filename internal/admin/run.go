@@ -1,0 +1,131 @@
+// Package admin はサブコマンド admin（管理API。本PoC の Provisioning API、D-13）の入口。
+// 加入者・RADIUSクライアント・認可ポリシーの CRUD を、mTLS で保護した REST API として提供する。
+package admin
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/oyaguma3/aka-radius/internal/admin/audit"
+	"github.com/oyaguma3/aka-radius/internal/admin/auth"
+	"github.com/oyaguma3/aka-radius/internal/admin/config"
+	"github.com/oyaguma3/aka-radius/internal/admin/handler"
+	"github.com/oyaguma3/aka-radius/internal/admin/server"
+	"github.com/oyaguma3/aka-radius/internal/admin/service"
+	"github.com/oyaguma3/aka-radius/internal/logging"
+	"github.com/oyaguma3/aka-radius/internal/valkey"
+)
+
+// version は管理API のバージョン（/status の version）。段階 2-3 で 2.0.0 に改める。
+var version = "0.4.0"
+
+// Main はサブコマンド admin を動かす。build はビルドの版（起動ログの build に出す。API の版の version とは別）。
+// 設定の誤りやサーバーの異常では、終了コード 1 でプロセスを終える。
+func Main(build string) {
+	startedAt := time.Now()
+
+	// アプリケーションログと監査ログは同じ標準出力に出すため、1行ずつ書き込むよう排他する
+	out := &lockedWriter{w: os.Stdout}
+
+	// 1. 設定読み込み
+	cfg, err := config.Load()
+	if err != nil {
+		slog.New(slog.NewJSONHandler(out, nil)).With("app", "admin").
+			Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	// 2. ロガー初期化
+	log := slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{Level: logging.ParseLevel(cfg.LogLevel)})).
+		With("app", "admin")
+	slog.SetDefault(log)
+
+	log.Info("starting admin",
+		"version", version,
+		"build", build,
+		"listen_addr", cfg.ListenAddr,
+		"log_level", cfg.LogLevel,
+		"node_name", cfg.NodeName,
+		"admin_clients", len(cfg.AdminClients),
+		"audit_max", cfg.AuditMax,
+	)
+
+	// 3. サーバー証明書の読み込み
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
+	if err != nil {
+		log.Error("failed to load server certificate", "cert", cfg.TLSCert, "key", cfg.TLSKey, "error", err)
+		os.Exit(1)
+	}
+
+	// 4. Valkey接続
+	rdb, err := valkey.NewClient(valkey.DefaultOptions().WithAddr(cfg.ValkeyAddr()).WithPassword(cfg.ValkeyPassword))
+	if err != nil {
+		log.Error("failed to connect to Valkey", "addr", cfg.ValkeyAddr(), "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = rdb.Close() }()
+	log.Info("connected to Valkey", "addr", cfg.ValkeyAddr())
+
+	// 5. 依存オブジェクト生成
+	// 監査ログは標準出力（正本）に出し、参照用に Valkey の Stream にも保存する（D-13 §6.2）
+	auditStore := audit.NewStore(rdb, cfg.AuditMax)
+	svc := service.New(rdb, audit.NewLogger(out).WithStore(auditStore, log), auditStore)
+
+	// ID の導入前に登録された RADIUSクライアントに ID を採番する（何度実行しても結果は同じ）
+	assigned, err := svc.EnsureClientIDs(context.Background())
+	if err != nil {
+		log.Error("failed to assign client ids", "error", err)
+		os.Exit(1)
+	}
+	if assigned > 0 {
+		log.Info("assigned client ids", "count", assigned)
+	}
+	h := handler.New(svc, log, version, cfg.NodeName, startedAt)
+	gin.SetMode(gin.ReleaseMode)
+	engine := server.NewEngine(h, cfg.AdminClients, log, logging.NewMasker(cfg.LogMaskIMSI))
+	verifier := &auth.Verifier{Clients: cfg.AdminClients, Log: log}
+	srv := server.New(cfg.ListenAddr, engine, verifier.TLSConfig(cert), log)
+
+	// 6. サーバー起動
+	go func() {
+		if err := srv.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 7. シグナル待機と Graceful Shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Info("shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Error("server shutdown error", "error", err)
+	}
+	log.Info("server stopped")
+}
+
+// lockedWriter は書き込みを排他する io.Writer。
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}

@@ -8,13 +8,8 @@ coverage.out
 
 # バイナリ
 *.exe
-apps/admin-tui/admin-tui-linux
-# リポジトリ直下で単一パッケージを go build したときの成果物
-/auth-server
-/acct-server
-/vector-gateway
-/vector-api
-/admin-tui
+# リポジトリ直下で go build ./cmd/aka-radius したときの成果物
+/aka-radius
 
 # IDE
 .vscode/
