@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/service"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/service"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
 )
 
 // gin.Context に保存する値のキー（server のミドルウェアが設定する）

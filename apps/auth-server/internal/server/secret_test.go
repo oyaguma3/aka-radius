@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/mocks"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/mocks"
 	"go.uber.org/mock/gomock"
 )
 

@@ -20,13 +20,13 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/auth"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/handler"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/server"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/service"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/auth"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/server"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/service"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
 	"github.com/redis/go-redis/v9"
 )
 

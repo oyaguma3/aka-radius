@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/store"
 )
 
 // manager はSessionManagerインターフェースの実装。

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/store"
 )
 
 // テスト用ValkeyClientを生成するヘルパー

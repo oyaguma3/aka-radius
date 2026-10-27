@@ -3,7 +3,7 @@ package usecase
 import (
 	"log/slog"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
 )
 
 // ProblemError はビジネスロジックエラーを表す。

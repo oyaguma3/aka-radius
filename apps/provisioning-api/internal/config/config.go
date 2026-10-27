@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/auth"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/auth"
 )
 
 // Config は Provisioning API の設定を保持する。

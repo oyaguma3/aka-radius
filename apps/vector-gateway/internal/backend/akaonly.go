@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/httputil"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/pkg/httputil"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 const (

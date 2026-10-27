@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/milenage"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/store"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/milenage"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/store"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 	"go.uber.org/mock/gomock"
 )
 

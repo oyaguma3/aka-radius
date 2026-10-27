@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 	"layeh.com/radius"
 )
 

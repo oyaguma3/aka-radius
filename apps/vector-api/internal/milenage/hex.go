@@ -3,7 +3,7 @@ package milenage
 import (
 	"encoding/hex"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
 )
 
 // HexDecode はHex文字列をバイト列に変換する。

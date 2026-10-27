@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/server"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/server"
 	"layeh.com/radius"
 )
 

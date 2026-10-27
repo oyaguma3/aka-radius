@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/backend"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/handler"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/router"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/server"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/backend"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/router"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/server"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 // build はビルドの版（git のコミットなど）。起動ログの build に出す。

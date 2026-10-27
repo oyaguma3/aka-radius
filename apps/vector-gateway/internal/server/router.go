@@ -2,7 +2,7 @@ package server
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/handler"
 )
 
 // SetupRouter はルーティングを設定する。

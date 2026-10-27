@@ -6,9 +6,9 @@ package usecase
 import (
 	"context"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/milenage"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/milenage"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/store"
 )
 
 // MilenageCalculator はMilenage計算のインターフェース。

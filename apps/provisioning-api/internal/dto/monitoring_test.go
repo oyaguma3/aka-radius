@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/audit"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 )
 
 func TestAuditAction(t *testing.T) {

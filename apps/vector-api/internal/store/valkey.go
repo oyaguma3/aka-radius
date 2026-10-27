@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
 	"github.com/redis/go-redis/v9"
 )
 

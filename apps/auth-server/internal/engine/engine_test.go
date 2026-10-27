@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/mocks"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/policy"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/session"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/vector"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/mocks"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/policy"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/session"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/vector"
 	eapaka "github.com/oyaguma3/go-eapaka"
 	"go.uber.org/mock/gomock"
 )

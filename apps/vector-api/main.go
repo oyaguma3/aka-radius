@@ -11,15 +11,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/handler"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/milenage"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/server"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/sqn"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/store"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/testmode"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/usecase"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/milenage"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/server"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/sqn"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/testmode"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/usecase"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 // build はビルドの版（git のコミットなど）。起動ログの build に出す。

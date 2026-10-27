@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server
+module github.com/oyaguma3/aka-radius/apps/auth-server
 
 go 1.27.3
 

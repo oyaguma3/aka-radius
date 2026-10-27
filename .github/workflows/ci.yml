@@ -67,7 +67,7 @@ jobs:
         run: |
           for app in auth-server acct-server vector-gateway vector-api provisioning-api; do
             echo "::group::$app"
-            docker build -f "apps/$app/Dockerfile" -t "eapaka-$app:ci" .
+            docker build -f "apps/$app/Dockerfile" -t "aka-radius-$app:ci" .
             echo "::endgroup::"
           done
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/store"
 )
 
 // EAPContext はEAP認証コンテキストを表す（D-09 セクション6.6.1/9.2.1準拠）。

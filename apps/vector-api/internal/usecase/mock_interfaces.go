@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	dto "github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
-	milenage "github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/milenage"
-	store "github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/store"
+	dto "github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
+	milenage "github.com/oyaguma3/aka-radius/apps/vector-api/internal/milenage"
+	store "github.com/oyaguma3/aka-radius/apps/vector-api/internal/store"
 	gomock "go.uber.org/mock/gomock"
 )
 
