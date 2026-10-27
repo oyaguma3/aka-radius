@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server
+module github.com/oyaguma3/aka-radius/apps/acct-server
 
 go 1.27.3
 

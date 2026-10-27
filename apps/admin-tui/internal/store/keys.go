@@ -1,7 +1,7 @@
 // Package store はValkeyアクセス層を提供する。
 package store
 
-import "github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
+import "github.com/oyaguma3/aka-radius/pkg/masterdata"
 
 // キープレフィックス定義（加入者・RADIUSクライアント・認可ポリシー・セッションのキーは pkg/masterdata）
 const (

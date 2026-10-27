@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/validation"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/validation"
 	"github.com/rivo/tview"
 )
 

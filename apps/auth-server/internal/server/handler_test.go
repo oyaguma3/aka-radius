@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/mocks"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/mocks"
 	eapaka "github.com/oyaguma3/go-eapaka"
 	"go.uber.org/mock/gomock"
 	"layeh.com/radius"

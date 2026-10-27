@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 var imsiPattern = regexp.MustCompile(`^[0-9]{15}$`)

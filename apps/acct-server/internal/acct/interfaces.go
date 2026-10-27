@@ -3,7 +3,7 @@ package acct
 import (
 	"context"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
 )
 
 // AccountingProcessor はAccounting処理のインターフェース。

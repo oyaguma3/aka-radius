@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/store"
 )
 
 // Session はアクティブセッションを表す（D-09 セクション9.3.1準拠）。

@@ -2,7 +2,7 @@
 package router
 
 import (
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/backend"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/backend"
 )
 
 // Router はIMSIからPLMNを抽出し、適切なバックエンドを選択する。

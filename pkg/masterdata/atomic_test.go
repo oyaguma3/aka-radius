@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 	"github.com/redis/go-redis/v9"
 )
 

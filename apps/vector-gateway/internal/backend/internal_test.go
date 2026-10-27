@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/httputil"
+	"github.com/oyaguma3/aka-radius/pkg/httputil"
 )
 
 func TestInternalBackend_GetVector_Success(t *testing.T) {

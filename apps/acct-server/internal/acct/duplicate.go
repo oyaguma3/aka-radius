@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/store"
 )
 
 // duplicateDetector はDuplicateDetectorインターフェースの実装。

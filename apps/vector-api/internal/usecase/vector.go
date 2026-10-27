@@ -8,10 +8,10 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/milenage"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/milenage"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 // VectorUseCase はベクター生成ユースケースを実装する。

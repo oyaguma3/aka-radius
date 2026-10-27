@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	eap "github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap"
+	eap "github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap"
 	gomock "go.uber.org/mock/gomock"
 )
 

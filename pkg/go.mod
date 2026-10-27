@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/pkg
+module github.com/oyaguma3/aka-radius/pkg
 
 go 1.27.3
 

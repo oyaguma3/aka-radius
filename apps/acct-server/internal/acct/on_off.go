@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/acct-server/internal/radius"
+	"github.com/oyaguma3/aka-radius/apps/acct-server/internal/radius"
 )
 
 // ProcessOn はAccounting-On（NAS起動通知）を処理する。

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
 	"github.com/sony/gobreaker"
 )
 

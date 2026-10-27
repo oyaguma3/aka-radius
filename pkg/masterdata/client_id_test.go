@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 )
 
 // TestClientStore_CreateAssignsID は、作成時にIDを 1 から順に採番し、IDからIPを引く索引を作ることを確認する。

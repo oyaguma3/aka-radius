@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway/internal/handler"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-gateway/internal/handler"
 )
 
 // HTTP サーバーの時間の上限。

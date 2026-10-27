@@ -1,6 +1,8 @@
-# EAP-AKA RADIUS PoC プロジェクト
+# aka-radius（EAP-AKA RADIUS PoC プロジェクトの後継）
 
 ## 概要
+- MVP セット（aka-mvpset）の RADIUS サーバーのノード。eapaka-radius-server-poc の履歴を引き継ぎ、MVP セットの段階 1 で名前（module パス `github.com/oyaguma3/aka-radius`）だけを変えた。MVP の改修は `docs/design-overview.md`（MVP の設計概要）のとおりに段階 2 で行う。D-文書の中の旧名とネットワーク名 `eapaka-prov` は段階 2 の改版のときに直す。
+- 以下は PoC の作りの説明（段階 2 で改める）。
 EAP-AKA/AKA' RADIUSサーバーのPoC環境の開発。Wi-Fi認証（WPA2/WPA3-Enterprise）向け。
 RADIUS認証機能・課金機能と、AKA認証ベクター生成機能と、管理用TUIアプリケーションを持つ。
 

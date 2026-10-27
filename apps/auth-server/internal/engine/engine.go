@@ -7,14 +7,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap/aka"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/eap/akaprime"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/policy"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/session"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/vector"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap/aka"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/eap/akaprime"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/policy"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/session"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/vector"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 	eapaka "github.com/oyaguma3/go-eapaka"
 )
 

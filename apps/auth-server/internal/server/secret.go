@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/auth-server/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/auth-server/internal/store"
 )
 
 // DynamicSecretSource はValkey登録情報に基づくRADIUS Secret解決を行う。

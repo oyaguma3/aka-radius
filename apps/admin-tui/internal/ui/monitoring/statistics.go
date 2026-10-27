@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/format"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/store"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/format"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/store"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui"
 	"github.com/rivo/tview"
 )
 

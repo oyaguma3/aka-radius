@@ -3,8 +3,8 @@ package monitoring
 import (
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/admin-tui/internal/ui"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/apps/admin-tui/internal/ui"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 )
 
 func TestSessionDetailScreen_NASIDColumn(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/config"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-api/internal/usecase"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/logging"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/config"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/apps/vector-api/internal/usecase"
+	"github.com/oyaguma3/aka-radius/pkg/logging"
 )
 
 // TraceIDKey はコンテキストにTraceIDを格納するキー。

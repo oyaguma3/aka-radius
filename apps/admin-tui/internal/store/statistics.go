@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
 )
 
 // Statistics は統計情報を表す。

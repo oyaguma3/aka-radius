@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/model"
 )
 
 func TestPolicyStore_Status_DefaultActive(t *testing.T) {

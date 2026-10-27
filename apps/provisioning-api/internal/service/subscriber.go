@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/audit"
-	"github.com/oyaguma3/eapaka-radius-server-poc/apps/provisioning-api/internal/dto"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/masterdata"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/model"
-	"github.com/oyaguma3/eapaka-radius-server-poc/pkg/validation"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/audit"
+	"github.com/oyaguma3/aka-radius/apps/provisioning-api/internal/dto"
+	"github.com/oyaguma3/aka-radius/pkg/masterdata"
+	"github.com/oyaguma3/aka-radius/pkg/model"
+	"github.com/oyaguma3/aka-radius/pkg/validation"
 )
 
 // 加入者の作成時の既定値（D-13 §3.1。Admin TUI と同じ）

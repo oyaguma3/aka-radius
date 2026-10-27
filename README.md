@@ -1,9 +1,11 @@
-# eapaka-radius-server-poc
+# aka-radius
 
 [![Go](https://img.shields.io/badge/Go-1.27.3-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-このリポジトリは PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset)）の一部です。組み合わせと変更の記録（CHANGELOG）は eapaka-pocset を参照してください。
+このリポジトリは、VPS に分けて置いて顧客を収容する **MVP セット**（[aka-mvpset](https://github.com/oyaguma3/aka-mvpset)）の RADIUS サーバーのノードです。PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset) の `pocset-v1.0.1`）の [eapaka-radius-server-poc](https://github.com/oyaguma3/eapaka-radius-server-poc) の履歴を引き継いで作りました（もとのコミット `main` の `1f8aad1`、`develop` の `86e05a9`）。
+
+いまは名前（Go の module パス）を変えただけで、作りは eapaka-radius-server-poc と同じです。MVP のための改修（vector-api と Admin-TUI を外して 1 つのモジュールにまとめる、テナントの刻印による認可、状態、利用の集計、管理API 2.0.0 など）は、[設計概要](docs/design-overview.md)のとおりに MVP セットの段階 2 で行います。今の作りの説明は、以下と `docs/` の D-文書にあります（D-文書の中の旧名とネットワーク名 `eapaka-prov` は、段階 2 の改版のときに直します）。
 
 ## 概要
 
@@ -42,7 +44,7 @@ Wi-Fi 認証 (WPA2/WPA3-Enterprise) 向けの RADIUS 認証・課金機能、AKA
 ## リポジトリ構成
 
 ```
-eapaka-radius-server-poc/
+aka-radius/
 ├── apps/
 │   ├── auth-server/        # RADIUS 認証サーバー
 │   ├── acct-server/        # RADIUS 課金サーバー
@@ -82,8 +84,8 @@ eapaka-radius-server-poc/
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/oyaguma3/eapaka-radius-server-poc.git
-cd eapaka-radius-server-poc
+git clone https://github.com/oyaguma3/aka-radius.git
+cd aka-radius
 
 # 環境変数を設定
 cd deployments
@@ -178,7 +180,7 @@ go test ./apps/auth-server/...
 
 ## ドキュメント
 
-`docs/` 配下に各種設計・運用ドキュメントがあります（全29件作成済み）。
+`docs/` 配下に各種設計・運用ドキュメントがあります（全29件作成済み）。MVP の設計概要は [`docs/design-overview.md`](docs/design-overview.md) で、D-文書の体系の外に置いています。
 
 ### 設計ドキュメント (13件)
 

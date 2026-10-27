@@ -1,4 +1,4 @@
-module github.com/oyaguma3/eapaka-radius-server-poc/apps/vector-gateway
+module github.com/oyaguma3/aka-radius/apps/vector-gateway
 
 go 1.27.3
 
