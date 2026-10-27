@@ -18,6 +18,7 @@ type EAPContext struct {
 	XRES                 string `redis:"xres"`
 	Kaut                 string `redis:"k_aut"`
 	MSK                  string `redis:"msk"`
+	SourceID             string `redis:"source_id"` // ベクターを取った取得先（再同期で同じ取得先に要求する）
 	ResyncCount          int    `redis:"resync_count"`
 	PermanentIDRequested bool   `redis:"permanent_id_requested"`
 }

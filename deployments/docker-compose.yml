@@ -8,7 +8,7 @@ x-logging: &fluent-bit-logging
 x-timezone: &timezone
   TZ: Asia/Tokyo
 
-# auth・acct・admin・gateway は同じイメージ aka-radius を、サブコマンドを変えて動かす（MVP の設計概要 §4）
+# auth・acct・admin は同じイメージ aka-radius を、サブコマンドを変えて動かす（MVP の設計概要 §4）
 x-aka-radius: &aka-radius
   image: aka-radius:${RADIUS_VERSION:-dev}
   build:
@@ -38,15 +38,16 @@ services:
       - "1812:1812/udp"
     environment:
       <<: *radius-common-env
-      # 段階 2-2 で取得先の登録簿に置き換える（gateway を auth に取り込む）
-      VECTOR_API_URL: http://gateway:8080
+      # 取得先の登録簿（MVP の設計概要 §7.1）。SIGHUP で読み直す: docker compose kill -s HUP auth
+      RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
       RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
       RADIUS_EAP_AKA_PRIME_NETWORK_NAME: ${RADIUS_EAP_AKA_PRIME_NETWORK_NAME:-WLAN}
+    volumes:
+      # 取得先の登録簿（sources.json）と、取得先ごとのクライアント証明書・鍵・サーバーの CA（中身は .gitignore 対象）
+      - ./sources:/etc/aka-radius/sources:ro
     depends_on:
       valkey:
         condition: service_healthy
-      gateway:
-        condition: service_started
     healthcheck:
       test: ["CMD", "pgrep", "-x", "aka-radius"]
       interval: 30s
@@ -87,49 +88,6 @@ services:
         fluentd-async: "true"
         fluentd-buffer-limit: "1048576"
         tag: "app.acct"
-
-  # Vector Gateway。段階 2-2 で取得先のクライアントを auth に取り込み、このサービスはなくす。
-  # vector-api（内部の取得先）は段階 2-1 で外したので、取得先は aka-only-server（接続方式 ID 01）だけ
-  gateway:
-    <<: *aka-radius
-    command: ["gateway"]
-    expose:
-      - "8080"
-    environment:
-      <<: *timezone
-      VECTOR_GATEWAY_MODE: ${VECTOR_GATEWAY_MODE:-gateway}
-      # 内部の取得先（接続方式 ID 00）。vector-api を外したので、名前の解決できない宛先にしてある
-      VECTOR_GATEWAY_INTERNAL_URL: http://vector-api.invalid:8080
-      VECTOR_GATEWAY_PLMN_MAP: ${VECTOR_GATEWAY_PLMN_MAP:-}
-      VECTOR_GATEWAY_INTERNAL_TIMEOUT: ${VECTOR_GATEWAY_INTERNAL_TIMEOUT:-3s}
-      # aka-only-server（接続方式ID:01）。URLが空なら01は無効
-      VECTOR_GATEWAY_AKAONLY_URL: ${VECTOR_GATEWAY_AKAONLY_URL:-}
-      VECTOR_GATEWAY_AKAONLY_CLIENT_CERT: ${VECTOR_GATEWAY_AKAONLY_CLIENT_CERT:-}
-      VECTOR_GATEWAY_AKAONLY_CLIENT_KEY: ${VECTOR_GATEWAY_AKAONLY_CLIENT_KEY:-}
-      VECTOR_GATEWAY_AKAONLY_SERVER_CERT: ${VECTOR_GATEWAY_AKAONLY_SERVER_CERT:-}
-      VECTOR_GATEWAY_AKAONLY_TIMEOUT: ${VECTOR_GATEWAY_AKAONLY_TIMEOUT:-3s}
-      # gateway は段階 2-2 でなくすので、ログの環境変数は PoC の名前のまま
-      LOG_MASK_IMSI: ${RADIUS_LOG_MASK_IMSI:-false}
-      LOG_LEVEL: ${RADIUS_LOG_LEVEL:-INFO}
-    volumes:
-      # aka-only-server接続用の証明書（av-client.pem / av-server.pem）
-      - ./certs:/certs:ro
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: always
-    # 停止の上限（10 秒）が Docker の既定の猶予と同じなので、強制終了と重ならないよう長くする
-    stop_grace_period: 20s
-    logging:
-      <<: *fluent-bit-logging
-      options:
-        fluentd-address: localhost:24224
-        fluentd-async: "true"
-        fluentd-buffer-limit: "1048576"
-        tag: "app.gateway"
 
   # ==========================================================================
   # Management Layer

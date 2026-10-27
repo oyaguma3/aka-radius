@@ -5,9 +5,7 @@ go 1.27.3
 require (
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/gin-gonic/gin v1.11.0
-	github.com/go-resty/resty/v2 v2.17.1
 	github.com/google/uuid v1.6.0
-	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/oyaguma3/go-eapaka v0.0.0-20260222130953-db627581125a
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/sony/gobreaker v1.0.0

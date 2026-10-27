@@ -1,0 +1,13 @@
+{
+  "sources": [
+    {
+      "id": "vecgen",
+      "name": "aka-vecgen",
+      "baseUrl": "https://aka-vecgen:8443/nudm-ueau/v1",
+      "clientCertFile": "vecgen-client.pem",
+      "clientKeyFile": "vecgen-client.key",
+      "serverCaFile": "vecgen-av-server.pem",
+      "timeout": "3s"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/mocks"
 	"github.com/oyaguma3/aka-radius/internal/auth/policy"
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
-	"github.com/oyaguma3/aka-radius/internal/auth/vector"
+	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/envconf"
 	eapaka "github.com/oyaguma3/go-eapaka"
 	"go.uber.org/mock/gomock"
@@ -27,6 +27,7 @@ const (
 	testNASID       = "test-nas"
 	testSSID        = "TestSSID"
 	testNetworkName = "WLAN"
+	testSourceID    = "vecgen"
 )
 
 // テスト用のダミーバイト列（16バイト）
@@ -153,7 +154,7 @@ func TestEngine_PermanentAKA_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -166,8 +167,8 @@ func TestEngine_PermanentAKA_Success(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), &vector.VectorRequest{IMSI: testIMSI}).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -191,7 +192,7 @@ func TestEngine_PermanentAKAPrime_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -203,8 +204,8 @@ func TestEngine_PermanentAKAPrime_Success(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKAPrime)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), &vector.VectorRequest{IMSI: testIMSI}).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -225,7 +226,7 @@ func TestEngine_Pseudonym_Fallback(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -255,7 +256,7 @@ func TestEngine_SIM_Reject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -282,7 +283,7 @@ func TestEngine_InvalidIdentity_Reject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -309,7 +310,7 @@ func TestEngine_VectorError_Reject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -321,8 +322,8 @@ func TestEngine_VectorError_Reject(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(nil, &vector.ConnectionError{Cause: context.DeadlineExceeded})
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(nil, &source.Error{Kind: source.KindTemporary, SourceID: testSourceID, Reason: "timeout", Err: context.DeadlineExceeded})
 
 	req := &eap.Request{
 		TraceID:    testTraceID,
@@ -340,7 +341,7 @@ func TestEngine_Vector404_Reject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -352,8 +353,8 @@ func TestEngine_Vector404_Reject(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(nil, &vector.APIError{StatusCode: 404, Message: "not found"})
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(nil, &source.Error{Kind: source.KindRejected, SourceID: testSourceID, Status: 403, Cause: "AUTHENTICATION_REJECTED"})
 
 	req := &eap.Request{
 		TraceID:    testTraceID,
@@ -372,13 +373,13 @@ func TestEngine_Vector404_Reject(t *testing.T) {
 // newChallengeTestEngine はChallenge応答テスト用のエンジンとモックを生成する
 func newChallengeTestEngine(ctrl *gomock.Controller) (
 	*EngineImpl,
-	*mocks.MockVectorClient,
+	*mocks.MockFetcher,
 	*mocks.MockContextStore,
 	*mocks.MockSessionStore,
 	*mocks.MockPolicyStore,
 	*mocks.MockEvaluator,
 ) {
-	mockVector := mocks.NewMockVectorClient(ctrl)
+	mockVector := mocks.NewMockFetcher(ctrl)
 	mockCtxStore := mocks.NewMockContextStore(ctrl)
 	mockSessStore := mocks.NewMockSessionStore(ctrl)
 	mockPolicyStore := mocks.NewMockPolicyStore(ctrl)
@@ -669,8 +670,8 @@ func TestEngine_SyncFailure_Success(t *testing.T) {
 	syncMsg := buildSyncFailureEAPMessage(2, eapaka.TypeAKA, auts)
 
 	mockCtxStore.EXPECT().Get(gomock.Any(), testTraceID).Return(eapCtx, nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -696,7 +697,7 @@ func TestEngine_SyncFailure_LimitExceeded(t *testing.T) {
 
 	keys := eapaka.DeriveKeysAKA("0"+testIMSI+"@realm", testCK, testIK)
 	eapCtx := makeChallengeContext(eapaka.TypeAKA, keys.K_aut, testXRES, keys.MSK)
-	eapCtx.ResyncCount = 32 // 上限に達している
+	eapCtx.ResyncCount = 1 // 上限（1 回）に達している
 
 	auts := make([]byte, 14)
 	syncMsg := buildSyncFailureEAPMessage(2, eapaka.TypeAKA, auts)
@@ -843,8 +844,8 @@ func TestEngine_IdentityResponse_Success(t *testing.T) {
 
 	mockCtxStore.EXPECT().Get(gomock.Any(), testTraceID).Return(eapCtx, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), &vector.VectorRequest{IMSI: testIMSI}).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -958,8 +959,8 @@ func TestEngine_CircuitBreakerOpen_Reject(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(nil, vector.ErrCircuitOpen)
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(nil, &source.Error{Kind: source.KindCircuitOpen, SourceID: testSourceID})
 
 	req := &eap.Request{
 		TraceID:    testTraceID,
@@ -982,7 +983,7 @@ func TestEngine_VectorUnknownError_Reject(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("unknown error"))
 
 	req := &eap.Request{
@@ -1067,8 +1068,8 @@ func TestEngine_Resync_VectorError(t *testing.T) {
 	syncMsg := buildSyncFailureEAPMessage(2, eapaka.TypeAKA, auts)
 
 	mockCtxStore.EXPECT().Get(gomock.Any(), testTraceID).Return(eapCtx, nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(nil, &vector.APIError{StatusCode: 500, Message: "internal error"})
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(nil, &source.Error{Kind: source.KindTemporary, SourceID: testSourceID, Status: 500, Cause: "SYSTEM_FAILURE"})
 	mockCtxStore.EXPECT().Delete(gomock.Any(), testTraceID).Return(nil)
 
 	req := &eap.Request{
@@ -1245,8 +1246,8 @@ func TestEngine_RFC3748Identity_PermanentAKA_Success(t *testing.T) {
 	eapMsg := buildRFC3748IdentityMessage(1, "0"+testIMSI+"@realm")
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), &vector.VectorRequest{IMSI: testIMSI}).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -1305,8 +1306,8 @@ func TestEngine_RequestVector_CtxUpdateError(t *testing.T) {
 	eapMsg := buildIdentityEAPMessage(1, eapaka.TypeAKA)
 
 	mockCtxStore.EXPECT().Create(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), &vector.VectorRequest{IMSI: testIMSI}).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).
@@ -1752,8 +1753,8 @@ func TestEngine_Resync_AKAPrime_Success(t *testing.T) {
 	syncMsg := buildSyncFailureEAPMessage(2, eapaka.TypeAKAPrime, auts)
 
 	mockCtxStore.EXPECT().Get(gomock.Any(), testTraceID).Return(eapCtx, nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).Return(nil)
@@ -1789,8 +1790,8 @@ func TestEngine_Resync_CtxUpdateError_Reject(t *testing.T) {
 	syncMsg := buildSyncFailureEAPMessage(2, eapaka.TypeAKA, auts)
 
 	mockCtxStore.EXPECT().Get(gomock.Any(), testTraceID).Return(eapCtx, nil)
-	mockVector.EXPECT().GetVector(gomock.Any(), gomock.Any()).
-		Return(&vector.VectorResponse{
+	mockVector.EXPECT().Fetch(gomock.Any(), gomock.Any()).
+		Return(&source.Vector{
 			RAND: testRAND, AUTN: testAUTN, XRES: testXRES, CK: testCK, IK: testIK,
 		}, nil)
 	mockCtxStore.EXPECT().Update(gomock.Any(), testTraceID, gomock.Any()).
@@ -1836,7 +1837,7 @@ func TestEngine_IdentityLog_UserNameMasked(t *testing.T) {
 
 			cfg := newTestConfig()
 			cfg.LogMaskIMSI = tt.maskIMSI
-			eng := NewEngine(mocks.NewMockVectorClient(ctrl), mocks.NewMockContextStore(ctrl), mocks.NewMockSessionStore(ctrl),
+			eng := NewEngine(mocks.NewMockFetcher(ctrl), mocks.NewMockContextStore(ctrl), mocks.NewMockSessionStore(ctrl),
 				mocks.NewMockPolicyStore(ctrl), mocks.NewMockEvaluator(ctrl), cfg)
 
 			req := &eap.Request{

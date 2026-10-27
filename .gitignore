@@ -26,9 +26,13 @@ docs/testresults/
 # ホスト上のログ出力
 deployments/logs_on_host/*.log
 
-# aka-only-server 接続用の証明書・秘密鍵
+# 管理API のサーバー証明書・秘密鍵
 deployments/certs/*
 !deployments/certs/.gitkeep
+
+# 取得先の登録簿と、取得先ごとの証明書・秘密鍵（例のファイルだけ管理する）
+deployments/sources/*
+!deployments/sources/sources.example.json
 
 # Claude Code
 .claude/

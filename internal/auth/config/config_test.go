@@ -14,7 +14,6 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("RADIUS_VALKEY_HOST", "localhost")
 	t.Setenv("RADIUS_VALKEY_PORT", "6379")
 	t.Setenv("RADIUS_VALKEY_PASSWORD", "secret")
-	t.Setenv("VECTOR_API_URL", "http://vector-gateway:8080/api/v1/vector")
 }
 
 func TestLoad(t *testing.T) {
@@ -23,6 +22,7 @@ func TestLoad(t *testing.T) {
 	t.Setenv("RADIUS_FALLBACK_SECRET", "testing123")
 	t.Setenv("RADIUS_EAP_AKA_PRIME_NETWORK_NAME", "TestNetwork")
 	t.Setenv("RADIUS_LOG_MASK_IMSI", "true")
+	t.Setenv("RADIUS_SOURCES_FILE", "/run/sources.json")
 
 	cfg, err := Load()
 	if err != nil {
@@ -38,8 +38,8 @@ func TestLoad(t *testing.T) {
 	if cfg.ValkeyPassword != "secret" {
 		t.Errorf("ValkeyPassword = %q, want %q", cfg.ValkeyPassword, "secret")
 	}
-	if cfg.VectorAPIURL != "http://vector-gateway:8080/api/v1/vector" {
-		t.Errorf("VectorAPIURL = %q, want %q", cfg.VectorAPIURL, "http://vector-gateway:8080/api/v1/vector")
+	if cfg.SourcesFile != "/run/sources.json" {
+		t.Errorf("SourcesFile = %q, want %q", cfg.SourcesFile, "/run/sources.json")
 	}
 	if cfg.ListenAddr != ":1813" {
 		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, ":1813")
@@ -69,6 +69,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.NetworkName != "WLAN" {
 		t.Errorf("NetworkName default = %q, want %q", cfg.NetworkName, "WLAN")
 	}
+	if cfg.SourcesFile != "/etc/aka-radius/sources/sources.json" {
+		t.Errorf("SourcesFile default = %q", cfg.SourcesFile)
+	}
 	if cfg.LogMaskIMSI != false {
 		t.Errorf("LogMaskIMSI default = %v, want %v", cfg.LogMaskIMSI, false)
 	}
@@ -81,36 +84,10 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadMissingRequired(t *testing.T) {
-	tests := []struct {
-		name    string
-		skipEnv string
-	}{
-		{name: "missing RADIUS_VALKEY_PASSWORD", skipEnv: "RADIUS_VALKEY_PASSWORD"},
-		{name: "missing VECTOR_API_URL", skipEnv: "VECTOR_API_URL"},
-	}
-
-	required := map[string]string{
-		"RADIUS_VALKEY_PASSWORD": "secret",
-		"VECTOR_API_URL":         "http://vector-gateway:8080/api/v1/vector",
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 必須環境変数をすべてクリアしてからテストする
-			for key := range required {
-				os.Unsetenv(key)
-			}
-			// skipEnv以外の必須変数を設定
-			for key, val := range required {
-				if key != tt.skipEnv {
-					t.Setenv(key, val)
-				}
-			}
-			_, err := Load()
-			if err == nil {
-				t.Errorf("Load() should return error when %s is missing", tt.skipEnv)
-			}
-		})
+	setRequiredEnv(t)
+	os.Unsetenv("RADIUS_VALKEY_PASSWORD")
+	if _, err := Load(); err == nil {
+		t.Error("Load() should return error when RADIUS_VALKEY_PASSWORD is missing")
 	}
 }
 
@@ -140,34 +117,7 @@ func TestValidateNetworkName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				NetworkName:  tt.networkName,
-				VectorAPIURL: "http://localhost:8080/api/v1/vector",
-			}
-			err := cfg.validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateVectorAPIURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		url     string
-		wantErr bool
-	}{
-		{name: "http", url: "http://localhost:8080/api/v1/vector", wantErr: false},
-		{name: "https", url: "https://vector.example.com/api/v1/vector", wantErr: false},
-		{name: "no scheme", url: "localhost:8080/api/v1/vector", wantErr: true},
-		{name: "ftp scheme", url: "ftp://localhost/vector", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{
-				NetworkName:  "WLAN",
-				VectorAPIURL: tt.url,
+				NetworkName: tt.networkName,
 			}
 			err := cfg.validate()
 			if (err != nil) != tt.wantErr {
@@ -188,32 +138,14 @@ func TestConstants(t *testing.T) {
 	if ValkeyPoolSize != 10 {
 		t.Errorf("ValkeyPoolSize = %d, want %d", ValkeyPoolSize, 10)
 	}
-	if VectorRequestTimeout != 5*time.Second {
-		t.Errorf("VectorRequestTimeout = %v, want %v", VectorRequestTimeout, 5*time.Second)
-	}
-	if CBName != "vector-gateway" {
-		t.Errorf("CBName = %q, want %q", CBName, "vector-gateway")
-	}
-	if CBMaxRequests != 3 {
-		t.Errorf("CBMaxRequests = %d, want %d", CBMaxRequests, 3)
-	}
-	if CBInterval != 10*time.Second {
-		t.Errorf("CBInterval = %v, want %v", CBInterval, 10*time.Second)
-	}
-	if CBTimeout != 30*time.Second {
-		t.Errorf("CBTimeout = %v, want %v", CBTimeout, 30*time.Second)
-	}
-	if CBFailureThreshold != 5 {
-		t.Errorf("CBFailureThreshold = %d, want %d", CBFailureThreshold, 5)
-	}
 	if EAPContextTTL != 60*time.Second {
 		t.Errorf("EAPContextTTL = %v, want %v", EAPContextTTL, 60*time.Second)
 	}
 	if SessionTTL != 24*time.Hour {
 		t.Errorf("SessionTTL = %v, want %v", SessionTTL, 24*time.Hour)
 	}
-	if MaxResyncCount != 32 {
-		t.Errorf("MaxResyncCount = %d, want %d", MaxResyncCount, 32)
+	if MaxResyncCount != 1 {
+		t.Errorf("MaxResyncCount = %d, want %d", MaxResyncCount, 1)
 	}
 }
 

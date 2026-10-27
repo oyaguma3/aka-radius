@@ -11,9 +11,8 @@ import (
 // テスト用にminiredisからConfigを生成するヘルパー
 func newTestConfig(addr string) *config.Config {
 	return &config.Config{
-		Common:       envconf.Common{ValkeyHost: splitHost(addr), ValkeyPort: splitPort(addr), ValkeyPassword: ""},
-		VectorAPIURL: "http://localhost:8080",
-		NetworkName:  "WLAN",
+		Common:      envconf.Common{ValkeyHost: splitHost(addr), ValkeyPort: splitPort(addr), ValkeyPassword: ""},
+		NetworkName: "WLAN",
 	}
 }
 

@@ -5,7 +5,7 @@
         "description": "Structured JSON logs from Go RADIUS PoC (slog JSONHandler)",
         "url": "http://localhost",
         "json": true,
-        "file-pattern": "(?:auth|acct|gateway|admin)\\.log",
+        "file-pattern": "(?:auth|acct|admin)\\.log",
         "timestamp-field": "time",
         "level-field": "level",
         "body-field": "msg",
