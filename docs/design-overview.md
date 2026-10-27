@@ -329,14 +329,17 @@
 | 段階 | 内容 | 終わりの確かめ |
 |---|---|---|
 | 1 | リポジトリ `aka-radius` を作り、本PoC の履歴ごと移す。改名だけ（module パス、コマンド、環境変数の接頭辞、Docker のネットワーク名、イメージ名、文書） | 今の CI が通る |
-| 2-1 | 1 つのモジュールにまとめ、Gin・resty・vector-api・Admin-TUI を外す。auth と acct の共通の部分をまとめる | 単体、ビルド |
-| 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7） | 単体、aka-vecgen との結合 |
-| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限 | 単体、結合 |
-| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計） | 単体、結合 |
-| 2-5 | 管理API 2.0.0、コマンド、ピンのファイル、監査ログの書き出し、healthcheck | 結合、aka-provisioner との契約の試験 |
-| 2-6 | D-文書の改版、運用ガイド、README | simwifi で aka-vecgen と通す |
+| 2-1 | 1 つのモジュールと 1 つのコマンドにまとめ、Admin-TUI と vector-api を外す。auth と acct の共通の部分をまとめる（Gin はこの手順では外さない。2-2 と 2-3 で口ごと消える） | 単体、ビルド |
+| 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7。gateway の Gin が消える） | 単体、aka-vecgen との結合、検証機での最初の通し（eapaka_test で EAP-AKA・EAP-AKA'・再同期） |
+| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限、管理API 2.0.0 の加入者の口（provisioning-api を置き換える。Gin がすべて消える） | 単体、結合 |
+| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合 |
+| 2-5 | 管理API 2.0.0 の残り（RADIUS クライアントと取得先の読み出し）、コマンド、ピンのファイル、監査ログの書き出し、healthcheck、共有のネットワークの名前 `eapaka-prov` を決め直す | 結合 |
+| 2-6 | D-文書の改版、運用ガイド、README | 検証機で全体を通す（刻印はエッジの代わりの radsecproxy で付け、Accounting は radclient で送る） |
 
-- 2-2 は aka-vecgen の段階 2-1 と同じ時期に行う（aka-vecgen の設計概要 §16）。
+- 手順の組み替え（2026-10-27。aka-mvpset の概要 §18.5 の H3）: データの形と、それを読み書きする口は同じ手順で変える（管理API の加入者の口を 2-3 に、`/sessions`・`/usage` を 2-4 に移した）。
+- 2-1・2-2 は aka-vecgen の 2-1 の後に行う（概要 §18.5 の H1）。
+- 手順ごとに feature ブランチと develop への PR（squash）を作り、develop → main は段階 2 の終わりに 1 回だけ行う。D-文書は 2-6 でまとめて改版し、それまでは本書を正とする（概要 §18.5 の H6）。
+- aka-provisioner との契約の試験は、aka-provisioner を作り直す段階 3-1 で行う（概要 §18.5 の H4）。
 
 ### 17.2 D-文書の扱い（S4）
 
