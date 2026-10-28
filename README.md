@@ -5,7 +5,7 @@
 
 このリポジトリは、VPS に分けて置いて顧客を収容する **MVP セット**（[aka-mvpset](https://github.com/oyaguma3/aka-mvpset)）の RADIUS サーバーのノードです。PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset) の `pocset-v1.0.1`）の [eapaka-radius-server-poc](https://github.com/oyaguma3/eapaka-radius-server-poc) の履歴を引き継いで作りました（もとのコミット `main` の `1f8aad1`、`develop` の `86e05a9`）。
 
-MVP のための改修は、[設計概要](docs/design-overview.md)のとおりに MVP セットの段階 2 で進めています。いまは段階 2-2 まで済んでいます。2-1 で 7 つの Go モジュールを 1 つのモジュールとコマンド `aka-radius` にまとめ、vector-api と Admin-TUI を外し、環境変数の名前を `RADIUS_` で始まるものに改めました。2-2 で vector-gateway を auth に取り込み、IMSI ごとの取得先から [認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md) で認証ベクターを取るようにしました（鍵は持ちません）。テナントの刻印による認可・状態（2-3）、利用の集計（2-4）、管理API 2.0.0（2-3〜2-5）はこれからです。`docs/` の D-文書は段階 2-6 でまとめて改版するので、それまでは設計概要と本書を正とします（D-文書には PoC の名前と作りが残っています）。
+MVP のための改修は、[設計概要](docs/design-overview.md)のとおりに MVP セットの段階 2 で進めています。いまは段階 2-3 まで済んでいます。2-1 で 7 つの Go モジュールを 1 つのモジュールとコマンド `aka-radius` にまとめ、vector-api と Admin-TUI を外し、環境変数の名前を `RADIUS_` で始まるものに改めました。2-2 で vector-gateway を auth に取り込み、IMSI ごとの取得先から [認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md) で認証ベクターを取るようにしました（鍵は持ちません）。2-3 で、加入者に状態・取得先・認可ポリシーのルールを持たせ、テナントの刻印で認可し、それらをベクターを取る前に確かめるようにしました。あわせて、IMSI を EAP の Identity から取る、重複した要求に前の応答を送り直す、要求の期限と同時に処理する上限を設ける、管理API 2.0.0（`/admin/v2`）の加入者の口を作る（Gin を外した）、を行いました。Accounting の作り直しと利用の集計（2-4）、管理API の残り・コマンド・ピンのファイル（2-5）はこれからです。`docs/` の D-文書は段階 2-6 でまとめて改版するので、それまでは設計概要と本書を正とします（D-文書には PoC の名前と作りが残っています）。
 
 ## 概要
 
@@ -20,7 +20,7 @@ Wi-Fi 認証 (WPA2/WPA3-Enterprise) 向けの RADIUS 認証・課金機能と、
 |---|---|---|
 | **auth** | RADIUS 認証 + EAP-AKA/AKA' ステートマシン制御。IMSI ごとの取得先から、認証ベクターを mTLS で 1 つずつ取る（取得先ごとに接続と遮断器を持つ） | UDP 1812 |
 | **acct** | RADIUS 課金 (Accounting) | UDP 1813 |
-| **admin**（任意） | 管理API（本PoC の Provisioning API。`/admin/v1`。加入者・RADIUSクライアント・認可ポリシー、監査ログ・セッションの参照）。aka-provisioner から mTLS で操作する。compose の profile `admin` で起動 | HTTPS 9444（既定 127.0.0.1 のみ） |
+| **admin**（任意） | 管理API 2.0.0（`/admin/v2`。加入者（状態・取得先・認可ポリシーのルール）、ノードの状態、監査ログ）。aka-provisioner から mTLS で操作する。compose の profile `admin` で起動 | HTTPS 9444（既定 127.0.0.1 のみ） |
 | **valkey** | データストア (加入者情報・セッション等) | 6379（127.0.0.1 のみ） |
 | **fluent-bit** | ログ収集・転送 | 24224（127.0.0.1 のみ） |
 | **取得先**（外部） | 認証ベクターを払い出すサーバー（[認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)。3GPP TS 29.503 Nudm_UEAU GenerateAv ベース。MVP では [aka-vecgen](https://github.com/oyaguma3/aka-vecgen)）。auth から mTLS で接続。取得先の登録簿（ファイル）に並べる | HTTPS（aka-vecgen は 8443） |
@@ -45,14 +45,10 @@ aka-radius/
 │   ├── auth/               # RADIUS 認証サーバー（サブコマンド auth。auth/source が取得先の登録簿とクライアント）
 │   ├── acct/               # RADIUS 課金サーバー（サブコマンド acct）
 │   ├── admin/              # 管理API（サブコマンド admin）
-│   ├── radiussrv/          # auth と acct に共通の RADIUS の受け口（待ち受け、共有シークレット、Message-Authenticator、Proxy-State、Status-Server）
+│   ├── radiussrv/          # auth と acct に共通の RADIUS の受け口（待ち受け、共有シークレット、Message-Authenticator、Proxy-State、Status-Server、重複応答のキャッシュ・要求の期限・同時処理の上限）
+│   ├── subscriber/         # 加入者（状態・取得先・ルール）の Valkey 上のデータとルールの評価（auth と admin で共通）
 │   ├── envconf/            # 環境変数の読み込み（Valkey とログの共通の設定）
-│   ├── apperr/             # エラー定義
-│   ├── httputil/           # HTTP ユーティリティ
 │   ├── logging/            # ログ設定
-│   ├── model/              # 共通モデル
-│   ├── validation/         # マスタデータの入力検証
-│   ├── masterdata/         # マスタデータの Valkey アクセス
 │   └── valkey/             # Valkey クライアント
 ├── configs/
 │   └── fluent-bit/         # Fluent Bit 設定 (YAML)
@@ -105,6 +101,9 @@ compose の `.env` に書く変数です。アプリが読む環境変数（`RAD
 | `VALKEY_PASSWORD` | Yes | Valkey 接続パスワード（アプリには `RADIUS_VALKEY_PASSWORD` として渡す） |
 | `RADIUS_FALLBACK_SECRET` | No | 予備の RADIUS 共有シークレット。設定すると、クライアント登録（送信元IP）のない送信元からのパケットもこの値で受け付ける。インターネットに公開する場合は空のままにする |
 | `RADIUS_EAP_AKA_PRIME_NETWORK_NAME` | No | EAP-AKA' のネットワーク名 (デフォルト: `WLAN`) |
+| `RADIUS_STAMP_VENDOR_ID`・`RADIUS_STAMP_VENDOR_TYPE` | No | テナントの刻印の Vendor-Specific の Vendor-Id と Vendor-Type (デフォルト: `32473` と `1`。エッジの設定と同じ値にする) |
+| `RADIUS_REQUEST_TIMEOUT` | No | 要求 1 つの処理の期限 (デフォルト: `4s`。auth・acct) |
+| `RADIUS_MAX_INFLIGHT` | No | 同時に処理する要求の上限 (デフォルト: `256`。超えた要求は応えずに捨てる。auth・acct) |
 | `RADIUS_LOG_LEVEL` | No | ログレベル (`DEBUG` / `INFO` / `WARN` / `ERROR`、デフォルト: `INFO`) |
 | `RADIUS_LOG_MASK_IMSI` | No | ログの IMSI をマスクするか (デフォルト: `false`。MVP の決定事項 26) |
 | `RADIUS_ADMIN_CLIENTS` | No | 管理API の管理クライアント（`識別名=クライアント証明書のSHA-256フィンガープリント` のカンマ区切り。admin を使う場合は必須） |
@@ -122,9 +121,9 @@ compose の `.env` に書く変数です。アプリが読む環境変数（`RAD
 | サブコマンド | 環境変数 |
 |---|---|
 | 共通（auth・acct・admin） | `RADIUS_VALKEY_HOST`（既定 `valkey`）、`RADIUS_VALKEY_PORT`（既定 `6379`）、`RADIUS_VALKEY_PASSWORD`（必須）、`RADIUS_LOG_LEVEL`、`RADIUS_LOG_MASK_IMSI` |
-| auth | `RADIUS_AUTH_LISTEN_ADDR`（既定 `:1812`）、`RADIUS_FALLBACK_SECRET`、`RADIUS_EAP_AKA_PRIME_NETWORK_NAME`（既定 `WLAN`。EAP-AKA' の `anId` と AT_KDF_INPUT）、`RADIUS_SOURCES_FILE`（既定 `/etc/aka-radius/sources/sources.json`） |
-| acct | `RADIUS_ACCT_LISTEN_ADDR`（既定 `:1813`）、`RADIUS_FALLBACK_SECRET` |
-| admin | `RADIUS_ADMIN_LISTEN_ADDR`（既定 `:9444`）、`RADIUS_ADMIN_TLS_CERT`・`RADIUS_ADMIN_TLS_KEY`（必須）、`RADIUS_ADMIN_CLIENTS`（必須）、`RADIUS_ADMIN_NODE_NAME`、`RADIUS_ADMIN_AUDIT_MAX` |
+| auth | `RADIUS_AUTH_LISTEN_ADDR`（既定 `:1812`）、`RADIUS_FALLBACK_SECRET`、`RADIUS_EAP_AKA_PRIME_NETWORK_NAME`（既定 `WLAN`。EAP-AKA' の `anId` と AT_KDF_INPUT）、`RADIUS_SOURCES_FILE`（既定 `/etc/aka-radius/sources/sources.json`）、`RADIUS_STAMP_VENDOR_ID`・`RADIUS_STAMP_VENDOR_TYPE`、`RADIUS_REQUEST_TIMEOUT`、`RADIUS_MAX_INFLIGHT` |
+| acct | `RADIUS_ACCT_LISTEN_ADDR`（既定 `:1813`）、`RADIUS_FALLBACK_SECRET`、`RADIUS_REQUEST_TIMEOUT`、`RADIUS_MAX_INFLIGHT` |
+| admin | `RADIUS_ADMIN_LISTEN_ADDR`（既定 `:9444`）、`RADIUS_ADMIN_TLS_CERT`・`RADIUS_ADMIN_TLS_KEY`（必須）、`RADIUS_ADMIN_CLIENTS`（必須）、`RADIUS_ADMIN_NODE_NAME`、`RADIUS_ADMIN_AUDIT_MAX`、`RADIUS_SOURCES_FILE`（auth と同じ登録簿を読み取り専用で読む）、`RADIUS_STAMP_VENDOR_ID`・`RADIUS_STAMP_VENDOR_TYPE`（`/status` に出す） |
 
 ### 取得先の登録簿
 
@@ -161,11 +160,40 @@ cd ..
 docker compose -f docker-compose.yml -f docker-compose.aka-av.yml up -d
 ```
 
-段階 2-3 で加入者の口（管理API 2.0.0）ができるまでは、`source_id` は Valkey に直接入れます（例 `HSET sub:<IMSI> source_id vecgen`）。
+- 加入者が指している取得先（`GET /admin/v2/status` の `sources[].subscriberCount` が 0 でない）を登録簿から消す読み直しは、受け付けません（ログに `SOURCES_RELOAD_ERR`）。先に加入者の `sourceId` を変えるか、加入者を消します。
+- admin も同じ登録簿を読み取り専用で読み（鍵は読みません）、加入者の `sourceId` が登録簿にあるかを確かめます。登録簿を直したら `docker compose kill -s HUP auth admin` で両方に読み直させます。
+
+### 加入者と認可
+
+加入者は管理API（`/admin/v2/subscribers`）で登録します。加入者は、状態（`active` / `inactive` / `terminated`）、認証ベクターの取得先（`sourceId`）、認可ポリシーのルール（`rules`）を持ちます（設計概要 §6.2・§8.2）。
+
+```json
+{"imsi":"440100123456789","state":"active","sourceId":"vecgen",
+ "rules":[{"tenantId":42,"nasId":"*","ssids":["*"],"vlanId":100,"sessionTimeout":3600}]}
+```
+
+auth は、最初の要求（IMSI が分かった時点）で、ベクターを取る前に次の順に確かめ、どれかに当たれば取得先を呼ばずに拒否します（設計概要 §8.1）。
+
+1. 加入者がいる（ログ `AUTH_SUBSCRIBER_NOT_FOUND`。本PoC の形の `sub:` が残っていれば `AUTH_SUBSCRIBER_INVALID`）
+2. 状態が `active`（`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`）
+3. テナントの刻印（Vendor-Specific。既定 Vendor-Id 32473、Vendor-Type 1）が 1 つだけあり、10 進の 1 以上の数（`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`）。刻印は、送信元の RADIUS クライアントに「刻印を信頼する」の印（`trust_stamp` が `1`）があるときだけ使い、ないときは刻印がないものとして扱います
+4. テナント・NAS-Identifier・SSID がすべて一致するルールがある（`AUTH_POLICY_DENIED`。どれにも一致しなければ拒否。本PoC の `default` はなくしました）
+
+Access-Accept の前に、状態だけもう一度確かめます。IMSI と鍵の導出には、RADIUS の User-Name ではなく EAP の Identity（EAP-Response/Identity と AT_IDENTITY）を使います（違えばログに `EAP_IDENTITY_MISMATCH`）。
+
+本PoC の形のデータ（鍵と SQN の入った `sub:`、`policy:`）は移し替えません。
+
+### RADIUS クライアント（段階 2-5 まで）
+
+RADIUS クライアント（エッジのトンネルの IP）を登録するコマンドは段階 2-5 で作ります。それまでは Valkey に直接書きます（`trust_stamp` が `1` のクライアントの刻印だけを使います）。
+
+```bash
+docker compose exec valkey sh -c 'valkey-cli -a "$VALKEY_PASSWORD" --no-auth-warning HSET client:192.0.2.10 secret <共有シークレット> name edge-01 trust_stamp 1'
+```
 
 ### 管理API（任意）
 
-aka-provisioner から加入者・RADIUSクライアント・認可ポリシーを操作する場合は、サーバー証明書を `deployments/certs/provisioning/`（`server.pem` / `server.key`）に置き、呼び出し側のクライアント証明書のフィンガープリントを `.env` の `RADIUS_ADMIN_CLIENTS` に登録して、profile を指定して起動します。
+aka-provisioner から加入者を操作する場合は、サーバー証明書を `deployments/certs/provisioning/`（`server.pem` / `server.key`）に置き、呼び出し側のクライアント証明書のフィンガープリントを `.env` の `RADIUS_ADMIN_CLIENTS` に登録して、profile を指定して起動します。
 
 ```bash
 docker compose --profile admin up -d
@@ -173,7 +201,7 @@ docker compose --profile admin up -d
 
 同じホストで動かす呼び出し側は、共有の Docker ネットワーク（既定名 `eapaka-prov`）に参加して `https://provisioning-api:9444` で接続します（admin のサービスに別名 `provisioning-api` を付けています。サーバー証明書の SAN に `DNS:provisioning-api` を入れます）。
 
-API 仕様は `docs/openapi/provisioning-api.yaml`、設計は D-13 を参照してください（段階 2-3〜2-5 で管理API 2.0.0 に改めます）。
+API 仕様は [docs/openapi/admin-api.yaml](docs/openapi/admin-api.yaml)（2.0.0-draft、`/admin/v2`）を参照してください。本PoC の Provisioning API（`/admin/v1`、`docs/openapi/provisioning-api.yaml`、D-13）は段階 2-3 でなくしました。セッション・利用の集計（2-4）、RADIUS クライアントと取得先の読み出し・ピンのファイル（2-5）はこれから足します。
 
 ## テスト実行
 

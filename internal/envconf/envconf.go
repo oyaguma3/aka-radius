@@ -6,10 +6,12 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // String は環境変数の値を返す。空なら def を返す。
@@ -50,6 +52,45 @@ func PositiveInt(name string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s: must be a positive integer", name)
 	}
 	return n, nil
+}
+
+// Duration は環境変数を時間（time.ParseDuration の書き方。例 4s）として読む。空なら def を返す。
+// lo〜hi の外なら誤りにする。
+func Duration(name string, def, lo, hi time.Duration) (time.Duration, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < lo || d > hi {
+		return 0, fmt.Errorf("%s: must be a duration between %s and %s", name, lo, hi)
+	}
+	return d, nil
+}
+
+// テナントの刻印の Vendor-Id と Vendor-Type の既定（概要の決定事項 29。MVP の設計概要 §8.3）
+const (
+	DefaultStampVendorID   = 32473
+	DefaultStampVendorType = 1
+)
+
+// StampVendor は RADIUS_STAMP_VENDOR_ID（既定 32473）と RADIUS_STAMP_VENDOR_TYPE（既定 1）を読む（auth と admin で共通）。
+func StampVendor() (uint32, byte, error) {
+	id, err := PositiveInt("RADIUS_STAMP_VENDOR_ID", DefaultStampVendorID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if id > math.MaxUint32 {
+		return 0, 0, errors.New("RADIUS_STAMP_VENDOR_ID: must be at most 4294967295")
+	}
+	typ, err := PositiveInt("RADIUS_STAMP_VENDOR_TYPE", DefaultStampVendorType)
+	if err != nil {
+		return 0, 0, err
+	}
+	if typ > 255 {
+		return 0, 0, errors.New("RADIUS_STAMP_VENDOR_TYPE: must be 1 to 255")
+	}
+	return uint32(id), byte(typ), nil
 }
 
 // Common は auth・acct・admin に共通する設定。

@@ -265,3 +265,37 @@ func TestBuildAKAIdentityRequest_AKAPrime(t *testing.T) {
 		t.Error("AT_PERMANENT_ID_REQが見つからない")
 	}
 }
+
+func TestIdentityFromResponse(t *testing.T) {
+	id := "0440100123456789@wlan.mnc010.mcc440.3gppnetwork.org"
+	msg := append([]byte{2, 7, 0, byte(5 + len(id)), 1}, id...)
+	if got, err := IdentityFromResponse(msg); err != nil || got != id {
+		t.Fatalf("got %q %v", got, err)
+	}
+	// 長さより後ろのバイトは使わない
+	if got, err := IdentityFromResponse(append(msg, 'x')); err != nil || got != id {
+		t.Errorf("trailing: got %q %v", got, err)
+	}
+	for name, bad := range map[string][]byte{
+		"short":    {2, 1, 0, 4},
+		"request":  append([]byte{1, 7, 0, byte(5 + len(id)), 1}, id...),
+		"aka":      append([]byte{2, 7, 0, byte(5 + len(id)), 23}, id...),
+		"too long": {2, 7, 0, 99, 1, 'a'},
+	} {
+		if _, err := IdentityFromResponse(bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestIdentityFromAKA(t *testing.T) {
+	pkt := &eapaka.Packet{Code: eapaka.CodeResponse, Type: eapaka.TypeAKA, Subtype: eapaka.SubtypeIdentity,
+		Attributes: []eapaka.Attribute{&eapaka.AtIdentity{Identity: "0440100123456789@realm"}}}
+	if got, ok := IdentityFromAKA(pkt); !ok || got != "0440100123456789@realm" {
+		t.Errorf("got %q %v", got, ok)
+	}
+	pkt.Attributes = nil
+	if _, ok := IdentityFromAKA(pkt); ok {
+		t.Error("no AT_IDENTITY: ok")
+	}
+}

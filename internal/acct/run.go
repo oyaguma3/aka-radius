@@ -70,7 +70,8 @@ func Main(build string) {
 	secretSource := radiussrv.NewSecretSource(clientStore, cfg.FallbackSecret)
 
 	// 8. RADIUSハンドラ
-	handler := server.NewHandler(processor)
+	// 重複した要求への応答の再送、要求の期限、同時に処理する上限（MVP の設計概要 §4・§9）
+	handler := radiussrv.NewGuard("ACCT", cfg.Guard, server.NewHandler(processor))
 
 	// 9. UDPサーバー
 	srv := radiussrv.NewServer(cfg.ListenAddr, handler, secretSource)

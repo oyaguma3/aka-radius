@@ -3,6 +3,9 @@ info:
   title: EAP-AKA RADIUS PoC Provisioning API
   version: 0.4.0
   description: |
+    **この API（`/admin/v1`）は、MVP セットの段階 2-3 でなくなった。** 後継は管理API 2.0.0（`docs/openapi/admin-api.yaml`、`/admin/v2`）。
+    この定義は本PoC の記録として、D-13 と一緒に段階 2-6 で廃止の記録をするまで残す。
+
     EAP-AKA RADIUS PoC環境の加入者、RADIUSクライアント、認可ポリシーを操作する API（D-13）。
     本PoCの外に置く BFF や、将来の統合API（eapaka-node-provisioner）から使う。
     作法は aka-only-server の管理API（admin-api.yaml）に揃えている。

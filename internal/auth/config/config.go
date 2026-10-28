@@ -6,6 +6,13 @@ import (
 	"strings"
 
 	"github.com/oyaguma3/aka-radius/internal/envconf"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+)
+
+// テナントの刻印の既定（概要の決定事項 29）
+const (
+	DefaultStampVendorID   = envconf.DefaultStampVendorID
+	DefaultStampVendorType = envconf.DefaultStampVendorType
 )
 
 // Config はアプリケーション設定を保持する
@@ -24,6 +31,14 @@ type Config struct {
 
 	// NetworkName は EAP-AKA' のネットワーク名（RADIUS_EAP_AKA_PRIME_NETWORK_NAME、既定 WLAN）
 	NetworkName string
+
+	// StampVendorID・StampVendorType はテナントの刻印の Vendor-Specific の Vendor-Id と Vendor-Type
+	// （RADIUS_STAMP_VENDOR_ID 既定 32473、RADIUS_STAMP_VENDOR_TYPE 既定 1。MVP の設計概要 §8.3）
+	StampVendorID   uint32
+	StampVendorType byte
+
+	// Guard は要求の期限と同時に処理する上限（RADIUS_REQUEST_TIMEOUT、RADIUS_MAX_INFLIGHT）
+	Guard radiussrv.GuardConfig
 }
 
 // Load は環境変数から設定を読み込む
@@ -38,6 +53,12 @@ func Load() (*Config, error) {
 		ListenAddr:     envconf.String("RADIUS_AUTH_LISTEN_ADDR", ":1812"),
 		NetworkName:    envconf.String("RADIUS_EAP_AKA_PRIME_NETWORK_NAME", "WLAN"),
 		SourcesFile:    envconf.String("RADIUS_SOURCES_FILE", "/etc/aka-radius/sources/sources.json"),
+	}
+	if cfg.StampVendorID, cfg.StampVendorType, err = envconf.StampVendor(); err != nil {
+		return nil, err
+	}
+	if cfg.Guard, err = radiussrv.LoadGuardConfig(); err != nil {
+		return nil, err
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)

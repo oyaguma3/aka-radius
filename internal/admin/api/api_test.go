@@ -1,0 +1,299 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json/v2"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/oyaguma3/aka-radius/internal/admin/audit"
+	"github.com/oyaguma3/aka-radius/internal/auth/source"
+	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/redis/go-redis/v9"
+)
+
+const testIMSI = "440100123456789"
+
+type fakeSources struct{ infos []source.Info }
+
+func (f fakeSources) Infos() ([]source.Info, time.Time) {
+	return f.infos, time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+}
+
+type testAPI struct {
+	srv  *httptest.Server
+	mr   *miniredis.Miniredis
+	logs *bytes.Buffer
+}
+
+func newTestAPI(t *testing.T) *testAPI {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	var logs bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logs, nil))
+	h := &Handler{
+		Subs: subscriber.NewStore(rdb),
+		Sources: fakeSources{infos: []source.Info{
+			{ID: "vecgen", Name: "aka-vecgen", BaseURL: "https://aka-vecgen:8443/nudm-ueau/v1", Timeout: 3 * time.Second, NotAfter: time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "other", Name: "other", BaseURL: "https://other/nudm-ueau/v1", Timeout: time.Second},
+		}},
+		Audit:           audit.NewRecorder(rdb, 1000, log),
+		Log:             log,
+		MgmtClient:      func(*http.Request) string { return "provisioner" },
+		AdminClients:    []string{"provisioner"},
+		Build:           "test",
+		NodeName:        "node-1",
+		StartedAt:       time.Date(2026, 10, 28, 1, 0, 0, 0, time.UTC),
+		StampVendorID:   32473,
+		StampVendorType: 1,
+	}
+	srv := httptest.NewServer(h.Routes())
+	t.Cleanup(srv.Close)
+	return &testAPI{srv: srv, mr: mr, logs: &logs}
+}
+
+// do は要求を送り、状態の符号と本文（JSON をデコードしたもの）を返す。
+func (a *testAPI) do(t *testing.T, method, path, body string, headers ...string) (int, map[string]any, http.Header) {
+	t.Helper()
+	var r io.Reader
+	if body != "" {
+		r = strings.NewReader(body)
+	}
+	req, _ := http.NewRequest(method, a.srv.URL+path, r)
+	req.Header.Set("X-Operator-Id", "alice")
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	var out map[string]any
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &out); err != nil {
+			t.Fatalf("%s %s: body %q: %v", method, path, data, err)
+		}
+	}
+	return resp.StatusCode, out, resp.Header
+}
+
+func (a *testAPI) wantStatus(t *testing.T, method, path, body string, status int, cause string) map[string]any {
+	t.Helper()
+	got, out, _ := a.do(t, method, path, body)
+	if got != status || (cause != "" && out["cause"] != cause) {
+		t.Fatalf("%s %s %s: status=%d body=%v, want %d %s", method, path, body, got, out, status, cause)
+	}
+	return out
+}
+
+const createBody = `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen",
+  "rules":[{"tenantId":42,"nasId":"*","ssids":["*"],"vlanId":100,"sessionTimeout":3600}]}`
+
+func TestSubscriberLifecycle(t *testing.T) {
+	a := newTestAPI(t)
+	base := "/admin/v2/subscribers"
+
+	code, out, hdr := a.do(t, "POST", base, createBody)
+	if code != http.StatusCreated || out["state"] != "active" || out["sourceId"] != "vecgen" || hdr.Get("Location") != base+"/"+testIMSI {
+		t.Fatalf("create: %d %v", code, out)
+	}
+	rules := out["rules"].([]any)
+	if r := rules[0].(map[string]any); r["tenantId"] != float64(42) || r["vlanId"] != float64(100) {
+		t.Errorf("rules = %v", rules)
+	}
+	a.wantStatus(t, "POST", base, createBody, http.StatusConflict, causeSubscriberExists)
+	a.wantStatus(t, "GET", base+"/"+testIMSI, "", http.StatusOK, "")
+	a.wantStatus(t, "GET", base+"/440100123456780", "", http.StatusNotFound, causeUserNotFound)
+	a.wantStatus(t, "GET", base+"/abc", "", http.StatusNotFound, causeUserNotFound)
+
+	// 変更（取得先とルール）。状態は専用の口
+	out = a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"sourceId":"other","rules":[{"tenantId":7,"nasId":"ap-1","ssids":["corp","guest"]}]}`, http.StatusOK, "")
+	if out["sourceId"] != "other" || len(out["rules"].([]any)) != 1 {
+		t.Errorf("patched = %v", out)
+	}
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"state":"inactive"}`, http.StatusBadRequest, causeOptionalIEIncorrect)
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"sourceId":"nowhere"}`, http.StatusBadRequest, causeUnknownSource)
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"x":1}`, http.StatusBadRequest, causeOptionalIEIncorrect)
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{}`, http.StatusBadRequest, causeMandatoryIEMissing)
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"rules":[{"tenantId":1,"nasId":"*","ssids":["*"],"vlan":1}]}`, http.StatusBadRequest, causeOptionalIEIncorrect)
+
+	// 状態: active は削除できない → inactive → terminated（変更できない）→ reinstate → 削除
+	a.wantStatus(t, "DELETE", base+"/"+testIMSI, "", http.StatusConflict, causeSubscriberActive)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"inactive","reason":"test"}`, http.StatusOK, "")
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"inactive"}`, http.StatusOK, "") // 同じ状態
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"terminated"}`, http.StatusOK, "")
+	a.wantStatus(t, "PATCH", base+"/"+testIMSI, `{"sourceId":"vecgen"}`, http.StatusConflict, causeSubscriberTerminated)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"active"}`, http.StatusConflict, causeTransitionNotAllowed)
+	a.wantStatus(t, "POST", base+"/"+testIMSI+"/reinstate", `{}`, http.StatusBadRequest, causeMandatoryIEMissing)
+	out = a.wantStatus(t, "POST", base+"/"+testIMSI+"/reinstate", `{"reason":"mistake"}`, http.StatusOK, "")
+	if out["state"] != "inactive" {
+		t.Errorf("reinstated = %v", out)
+	}
+	a.wantStatus(t, "POST", base+"/"+testIMSI+"/reinstate", `{"reason":"again"}`, http.StatusConflict, causeTransitionNotAllowed)
+	code, _, _ = a.do(t, "DELETE", base+"/"+testIMSI, "")
+	if code != http.StatusNoContent {
+		t.Fatalf("delete = %d", code)
+	}
+	a.wantStatus(t, "DELETE", base+"/"+testIMSI, "", http.StatusNotFound, causeUserNotFound)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"active"}`, http.StatusNotFound, causeUserNotFound)
+	a.wantStatus(t, "POST", base+"/"+testIMSI+"/reinstate", `{"reason":"x"}`, http.StatusNotFound, causeUserNotFound)
+
+	// 監査ログ（新しい順）
+	out = a.wantStatus(t, "GET", "/admin/v2/audit-logs?limit=500", "", http.StatusOK, "")
+	var actions []string
+	for _, it := range out["items"].([]any) {
+		e := it.(map[string]any)
+		actions = append(actions, e["action"].(string))
+		if e["operator"] != "alice" || e["mgmtClient"] != "provisioner" || e["target"] != testIMSI || e["traceId"] == "" {
+			t.Errorf("entry = %v", e)
+		}
+	}
+	want := "subscriber.delete subscriber.reinstate subscriber.state subscriber.state subscriber.state subscriber.update subscriber.create"
+	if strings.Join(actions, " ") != want {
+		t.Errorf("actions = %v", actions)
+	}
+	// 同じ状態への変更は unchanged を残す
+	if !strings.Contains(a.logs.String(), `"event_id":"AUDIT"`) {
+		t.Error("no AUDIT log")
+	}
+}
+
+func TestCreateValidation(t *testing.T) {
+	a := newTestAPI(t)
+	base := "/admin/v2/subscribers"
+	tests := []struct {
+		name, body, cause string
+	}{
+		{"JSON でない", `{`, causeInvalidMsgFormat},
+		{"未知の項目", `{"imsi":"` + testIMSI + `","x":1}`, causeInvalidMsgFormat},
+		{"ルールの未知の項目", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*"],"x":1}]}`, causeInvalidMsgFormat},
+		{"必須の欠落", `{"imsi":"` + testIMSI + `"}`, causeMandatoryIEMissing},
+		{"IMSI の形", `{"imsi":"123","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"terminated で登録", `{"imsi":"` + testIMSI + `","state":"terminated","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"取得先の ID の形", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"BAD","rules":[{"tenantId":1,"nasId":"*","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"ルールがない", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[]}`, causeMandatoryIEIncorrect},
+		{"テナントが 0", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":0,"nasId":"*","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"テナントがない", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"nasId":"*","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"NAS-Identifier が空", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"","ssids":["*"]}]}`, causeMandatoryIEIncorrect},
+		{"SSID の * と名前の混在", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*","corp"]}]}`, causeMandatoryIEIncorrect},
+		{"SSID が長い", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["` + strings.Repeat("a", 33) + `"]}]}`, causeMandatoryIEIncorrect},
+		{"VLAN の範囲", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*"],"vlanId":4095}]}`, causeMandatoryIEIncorrect},
+		{"Session-Timeout の範囲", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"vecgen","rules":[{"tenantId":1,"nasId":"*","ssids":["*"],"sessionTimeout":0}]}`, causeMandatoryIEIncorrect},
+		{"登録簿にない取得先", `{"imsi":"` + testIMSI + `","state":"active","sourceId":"nowhere","rules":[{"tenantId":1,"nasId":"*","ssids":["*"]}]}`, causeUnknownSource},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a.wantStatus(t, "POST", base, tt.body, http.StatusBadRequest, tt.cause)
+		})
+	}
+	// 33 件のルール
+	var rules []string
+	for range 33 {
+		rules = append(rules, `{"tenantId":1,"nasId":"*","ssids":["*"]}`)
+	}
+	a.wantStatus(t, "POST", base, `{"imsi":"`+testIMSI+`","state":"active","sourceId":"vecgen","rules":[`+strings.Join(rules, ",")+`]}`, http.StatusBadRequest, causeMandatoryIEIncorrect)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"paused"}`, http.StatusBadRequest, causeMandatoryIEIncorrect)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{"state":"active","reason":"`+strings.Repeat("x", 501)+`"}`, http.StatusBadRequest, causeOptionalIEIncorrect)
+	a.wantStatus(t, "PUT", base+"/"+testIMSI+"/state", `{}`, http.StatusBadRequest, causeMandatoryIEMissing)
+}
+
+func TestListAndBatchGet(t *testing.T) {
+	a := newTestAPI(t)
+	for _, imsi := range []string{"440100000000003", "440100000000001", "440200000000001", "440100000000002"} {
+		a.wantStatus(t, "POST", "/admin/v2/subscribers", strings.Replace(createBody, testIMSI, imsi, 1), http.StatusCreated, "")
+	}
+	out := a.wantStatus(t, "GET", "/admin/v2/subscribers?prefix=4401&limit=2", "", http.StatusOK, "")
+	if out["total"] != float64(3) || out["nextCursor"] != "440100000000002" || len(out["items"].([]any)) != 2 {
+		t.Fatalf("page 1 = %v", out)
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/subscribers?prefix=4401&limit=2&cursor=440100000000002", "", http.StatusOK, "")
+	if _, ok := out["nextCursor"]; ok || len(out["items"].([]any)) != 1 {
+		t.Fatalf("page 2 = %v", out)
+	}
+	a.wantStatus(t, "GET", "/admin/v2/subscribers?prefix=abc", "", http.StatusBadRequest, causeInvalidQueryParam)
+	a.wantStatus(t, "GET", "/admin/v2/subscribers?cursor=1", "", http.StatusBadRequest, causeInvalidQueryParam)
+	a.wantStatus(t, "GET", "/admin/v2/subscribers?limit=501", "", http.StatusBadRequest, causeInvalidQueryParam)
+
+	out = a.wantStatus(t, "POST", "/admin/v2/subscribers/batch-get", `{"imsis":["440200000000001","449999999999999","440200000000001","440100000000001"]}`, http.StatusOK, "")
+	items := out["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["imsi"] != "440200000000001" || len(out["notFound"].([]any)) != 1 {
+		t.Errorf("batch-get = %v", out)
+	}
+	a.wantStatus(t, "POST", "/admin/v2/subscribers/batch-get", `{}`, http.StatusBadRequest, causeMandatoryIEMissing)
+	a.wantStatus(t, "POST", "/admin/v2/subscribers/batch-get", `{"imsis":[]}`, http.StatusBadRequest, causeMandatoryIEIncorrect)
+	a.wantStatus(t, "POST", "/admin/v2/subscribers/batch-get", `{"imsis":["1"]}`, http.StatusBadRequest, causeMandatoryIEIncorrect)
+
+	// 本PoC の形の sub: が残っていれば 500（移し替えない）
+	a.mr.HSet("sub:440300000000001", "ki", "00")
+	a.wantStatus(t, "POST", "/admin/v2/subscribers/batch-get", `{"imsis":["440300000000001"]}`, http.StatusInternalServerError, causeSystemFailure)
+}
+
+func TestStatusAndCommon(t *testing.T) {
+	a := newTestAPI(t)
+	a.wantStatus(t, "POST", "/admin/v2/subscribers", createBody, http.StatusCreated, "")
+	out := a.wantStatus(t, "GET", "/admin/v2/status", "", http.StatusOK, "")
+	if out["version"] != Version || out["build"] != "test" || out["subscriberCount"] != float64(1) || out["stampVendorId"] != float64(32473) {
+		t.Errorf("status = %v", out)
+	}
+	srcs := out["sources"].([]any)
+	if s := srcs[0].(map[string]any); s["id"] != "vecgen" || s["subscriberCount"] != float64(1) || s["clientCertificateNotAfter"] == nil || s["timeoutMs"] != float64(3000) {
+		t.Errorf("sources[0] = %v", s)
+	}
+	if s := srcs[1].(map[string]any); s["subscriberCount"] != float64(0) || s["clientCertificateNotAfter"] != nil {
+		t.Errorf("sources[1] = %v", s)
+	}
+
+	// X-Trace-ID は受け取った値をそのまま返し、なければ採番する
+	_, _, hdr := a.do(t, "GET", "/admin/v2/status", "", "X-Trace-ID", "trace-123")
+	if hdr.Get("X-Trace-ID") != "trace-123" {
+		t.Errorf("X-Trace-ID = %q", hdr.Get("X-Trace-ID"))
+	}
+	_, _, hdr = a.do(t, "GET", "/admin/v2/status", "")
+	if len(hdr.Get("X-Trace-ID")) != 32 {
+		t.Errorf("generated X-Trace-ID = %q", hdr.Get("X-Trace-ID"))
+	}
+	code, out, _ := a.do(t, "GET", "/admin/v2/status", "", "X-Operator-Id", "bad id!")
+	if code != http.StatusBadRequest || out["cause"] != causeOptionalIEIncorrect {
+		t.Errorf("bad operator: %d %v", code, out)
+	}
+	a.wantStatus(t, "GET", "/admin/v1/subscribers", "", http.StatusNotFound, causeNotFound)
+	if !strings.Contains(a.logs.String(), `"event_id":"ADMIN_REQUEST"`) {
+		t.Error("no ADMIN_REQUEST log")
+	}
+
+	// 監査ログのページ送り
+	for range 3 {
+		a.wantStatus(t, "PUT", "/admin/v2/subscribers/"+testIMSI+"/state", `{"state":"active"}`, http.StatusOK, "")
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/audit-logs?limit=2", "", http.StatusOK, "")
+	next, _ := out["nextBefore"].(string)
+	if len(out["items"].([]any)) != 2 || next == "" {
+		t.Fatalf("audit page 1 = %v", out)
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/audit-logs?limit=2&before="+next, "", http.StatusOK, "")
+	if len(out["items"].([]any)) != 2 {
+		t.Errorf("audit page 2 = %v", out)
+	}
+	if d := out["items"].([]any)[0].(map[string]any)["detail"].(map[string]any); d["unchanged"] != true {
+		t.Errorf("detail = %v", d)
+	}
+	a.wantStatus(t, "GET", "/admin/v2/audit-logs?before=x", "", http.StatusBadRequest, causeInvalidQueryParam)
+}
+
+func TestPreviousIDBoundary(t *testing.T) {
+	a := newTestAPI(t)
+	out := a.wantStatus(t, "GET", "/admin/v2/audit-logs?before=0-0", "", http.StatusOK, "")
+	if len(out["items"].([]any)) != 0 {
+		t.Errorf("items = %v", out)
+	}
+}

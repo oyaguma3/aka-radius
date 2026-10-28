@@ -3,6 +3,7 @@ package envconf
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadCommon(t *testing.T) {
@@ -106,5 +107,44 @@ func TestRequired(t *testing.T) {
 	t.Setenv("X_REQ", "v")
 	if v, err := Required("X_REQ"); err != nil || v != "v" {
 		t.Errorf("Required(v) = %q, %v", v, err)
+	}
+}
+
+func TestDuration(t *testing.T) {
+	t.Setenv("X_DUR", "")
+	if d, err := Duration("X_DUR", 4*time.Second, time.Second, time.Minute); err != nil || d != 4*time.Second {
+		t.Errorf("default: %v %v", d, err)
+	}
+	t.Setenv("X_DUR", "1500ms")
+	if d, err := Duration("X_DUR", 4*time.Second, time.Second, time.Minute); err != nil || d != 1500*time.Millisecond {
+		t.Errorf("set: %v %v", d, err)
+	}
+	for _, bad := range []string{"abc", "100ms", "2m"} {
+		t.Setenv("X_DUR", bad)
+		if _, err := Duration("X_DUR", 4*time.Second, time.Second, time.Minute); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestStampVendor(t *testing.T) {
+	t.Setenv("RADIUS_STAMP_VENDOR_ID", "")
+	t.Setenv("RADIUS_STAMP_VENDOR_TYPE", "")
+	if id, typ, err := StampVendor(); err != nil || id != 32473 || typ != 1 {
+		t.Errorf("default: %d %d %v", id, typ, err)
+	}
+	t.Setenv("RADIUS_STAMP_VENDOR_ID", "9")
+	t.Setenv("RADIUS_STAMP_VENDOR_TYPE", "2")
+	if id, typ, err := StampVendor(); err != nil || id != 9 || typ != 2 {
+		t.Errorf("set: %d %d %v", id, typ, err)
+	}
+	t.Setenv("RADIUS_STAMP_VENDOR_ID", "4294967296")
+	if _, _, err := StampVendor(); err == nil {
+		t.Error("too large vendor id accepted")
+	}
+	t.Setenv("RADIUS_STAMP_VENDOR_ID", "9")
+	t.Setenv("RADIUS_STAMP_VENDOR_TYPE", "256")
+	if _, _, err := StampVendor(); err == nil {
+		t.Error("too large vendor type accepted")
 	}
 }

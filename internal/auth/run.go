@@ -2,6 +2,9 @@
 package auth
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -9,13 +12,13 @@ import (
 
 	"github.com/oyaguma3/aka-radius/internal/auth/config"
 	"github.com/oyaguma3/aka-radius/internal/auth/engine"
-	"github.com/oyaguma3/aka-radius/internal/auth/policy"
 	"github.com/oyaguma3/aka-radius/internal/auth/server"
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/auth/store"
 	"github.com/oyaguma3/aka-radius/internal/logging"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"github.com/oyaguma3/aka-radius/internal/subscriber"
 )
 
 // Main はサブコマンド auth を動かす。build はビルドの版（起動ログの build に出す）。
@@ -41,6 +44,11 @@ func Main(build string) {
 		"sources_file", cfg.SourcesFile,
 		"network_name", cfg.NetworkName,
 		"fallback_secret", cfg.FallbackSecret != "",
+		// 刻印の Vendor-Id と Vendor-Type は、エッジの設定と合っているかを確かめられるように起動のときに出す（概要 §8.1）
+		"stamp_vendor_id", cfg.StampVendorID,
+		"stamp_vendor_type", cfg.StampVendorType,
+		"request_timeout_ms", cfg.Guard.RequestTimeout.Milliseconds(),
+		"max_in_flight", cfg.Guard.MaxInFlight,
 	)
 	radiussrv.WarnFallbackSecret(cfg.FallbackSecret)
 
@@ -70,6 +78,7 @@ func Main(build string) {
 	slog.Info("Valkey接続完了", "addr", cfg.ValkeyAddr())
 
 	// 5. RADIUS サーバー
+	subs := subscriber.NewStore(valkeyClient.Client())
 	srv := newServer(cfg, valkeyClient, registry)
 
 	// 6. SIGHUP で取得先の登録簿を読み直す（失敗したら前の登録簿のまま続ける）
@@ -77,7 +86,7 @@ func Main(build string) {
 	signal.Notify(hupCh, syscall.SIGHUP)
 	go func() {
 		for range hupCh {
-			reloadSources(registry)
+			reloadSources(registry, subs)
 		}
 	}()
 
@@ -96,22 +105,37 @@ func Main(build string) {
 
 // newServer は auth の RADIUS サーバーを組み立てる（試験でも使う）。
 func newServer(cfg *config.Config, valkeyClient *store.ValkeyClient, registry *source.Registry) *radiussrv.Server {
-	fetcher := source.NewService(store.NewSubscriberStore(valkeyClient), registry)
+	subs := subscriber.NewStore(valkeyClient.Client())
+	fetcher := source.NewService(sourceLookup{subs}, registry)
 	eapEngine := engine.NewEngine(
 		fetcher,
 		session.NewContextStore(valkeyClient),
 		session.NewSessionStore(valkeyClient),
-		store.NewPolicyStore(valkeyClient),
-		policy.NewEvaluator(),
+		subs,
+		radiussrv.NewStampTrust(valkeyClient.Client()),
 		cfg,
 	)
 	secretSource := radiussrv.NewSecretSource(radiussrv.NewClientStore(valkeyClient.Client()), cfg.FallbackSecret)
-	return radiussrv.NewServer(cfg.ListenAddr, server.NewHandler(eapEngine), secretSource)
+	handler := radiussrv.NewGuard("AUTH", cfg.Guard, server.NewHandler(eapEngine, cfg.StampVendorID, cfg.StampVendorType))
+	return radiussrv.NewServer(cfg.ListenAddr, handler, secretSource)
+}
+
+// sourceLookup は加入者の取得先の ID を引く（source.SubscriberLookup の実装）。
+// エンジンは判定のときに読んだ取得先を渡すので、ふだんは使わない。
+type sourceLookup struct{ subs *subscriber.Store }
+
+func (l sourceLookup) GetSourceID(ctx context.Context, imsi string) (string, error) {
+	sub, err := l.subs.Get(ctx, imsi)
+	if errors.Is(err, subscriber.ErrNotFound) || errors.Is(err, subscriber.ErrInvalid) {
+		return "", nil
+	}
+	return sub.SourceID, err
 }
 
 // reloadSources は取得先の登録簿を読み直し、結果をログに出す。
-func reloadSources(registry *source.Registry) {
-	if err := registry.Reload(); err != nil {
+// 加入者が指している取得先（取得先ごとの加入者の数が 0 でない）を消す登録簿は受け付けない（MVP の設計概要 §7.1）。
+func reloadSources(registry *source.Registry, subs *subscriber.Store) {
+	if err := registry.Reload(sourcesInUse(subs)); err != nil {
 		slog.Error("取得先の登録簿の読み直し失敗（前の登録簿のまま続ける）",
 			"event_id", "SOURCES_RELOAD_ERR",
 			"error", err,
@@ -139,4 +163,24 @@ func logSources(msg, eventID string, registry *source.Registry) {
 		})
 	}
 	slog.Info(msg, "event_id", eventID, "count", len(infos), "sources", sources)
+}
+
+// sourcesInUse は、加入者が指している取得先を消す読み直しを断る関数を返す（MVP の設計概要 §7.1）。
+// 取得先ごとの加入者の数（cnt:src:{id}）を読めないときも、念のため断る。
+func sourcesInUse(subs *subscriber.Store) func(removed []string) error {
+	return func(removed []string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), config.ValkeyCommandTimeout)
+		defer cancel()
+		counts, err := subs.SourceCounts(ctx, removed)
+		if err != nil {
+			return fmt.Errorf("count subscribers of removed sources: %w", err)
+		}
+		var errs []error
+		for _, id := range removed {
+			if n := counts[id]; n > 0 {
+				errs = append(errs, fmt.Errorf("source %q is used by %d subscribers", id, n))
+			}
+		}
+		return errors.Join(errs...)
+	}
 }

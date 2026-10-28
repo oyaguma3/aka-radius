@@ -84,3 +84,28 @@ func BuildAKAIdentityRequest(identifier uint8, eapType uint8) ([]byte, error) {
 	}
 	return pkt.Marshal()
 }
+
+// eapCodeResponse は EAP の Response の Code（RFC 3748 §4）
+const eapCodeResponse = 2
+
+// IdentityFromResponse は EAP-Response/Identity（Type 1）の Type-Data（端末の Identity）を返す（RFC 3748 §5.1）。
+// IMSI は RADIUS の User-Name ではなく、EAP の中の Identity から取る（MVP の設計概要 §8.1。決定事項 8）。
+func IdentityFromResponse(data []byte) (string, error) {
+	if len(data) < 5 || data[0] != eapCodeResponse || data[4] != EAPTypeIdentity {
+		return "", fmt.Errorf("%w: not an EAP-Response/Identity", ErrInvalidIdentity)
+	}
+	n := int(binary.BigEndian.Uint16(data[2:4]))
+	if n < 5 || n > len(data) {
+		return "", fmt.Errorf("%w: bad EAP length", ErrInvalidIdentity)
+	}
+	return string(data[5:n]), nil
+}
+
+// IdentityFromAKA は AKA-Identity の AT_IDENTITY を返す（RFC 4187 §9.2）。
+func IdentityFromAKA(pkt *eapaka.Packet) (string, bool) {
+	at, ok := GetAttribute[*eapaka.AtIdentity](pkt)
+	if !ok {
+		return "", false
+	}
+	return at.Identity, true
+}

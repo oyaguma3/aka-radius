@@ -12,6 +12,7 @@ import (
 // Session はアクティブセッションを表す（D-09 セクション9.3.1準拠）。
 type Session struct {
 	IMSI          string `redis:"imsi"`
+	TenantID      int64  `redis:"tenant_id"` // 刻印のテナントの ID（MVP の設計概要 §6.1）
 	NasIP         string `redis:"nas_ip"`
 	NasIdentifier string `redis:"nas_identifier"` // ポリシー評価に使ったNAS-Identifier（プロキシ経由でもNASを識別できる）
 	StartTime     int64  `redis:"start_time"`

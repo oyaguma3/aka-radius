@@ -87,15 +87,31 @@ func LoadRegistry(path string) (*Registry, error) {
 
 // Reload は登録簿を読み直す。読めない・形が違うときは前の登録簿のまま続け、エラーを返す。
 // 読み直したときは全部の取得先のクライアントを作り直す（遮断器は閉じた状態から。古い接続は閉じる）。
-// 加入者が指している取得先を消す読み直しを拒否するのは段階 2-3（取得先ごとの加入者の数ができてから）。
-func (r *Registry) Reload() error {
+// check は消える取得先の ID を受け取り、消してはいけなければ誤りを返す（加入者が指している取得先。MVP の設計概要 §7.1）。
+// 誤りなら前の登録簿のまま続ける。nil なら確かめない。
+func (r *Registry) Reload(check func(removed []string) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, err := readSet(r.path)
 	if err != nil {
 		return err
 	}
-	old := r.cur.Swap(s)
+	old := r.cur.Load()
+	var removed []string
+	for _, id := range old.order {
+		if _, ok := s.byID[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	if check != nil && len(removed) > 0 {
+		if err := check(removed); err != nil {
+			for _, e := range s.byID {
+				e.client.close()
+			}
+			return err
+		}
+	}
+	r.cur.Store(s)
 	for _, e := range old.byID {
 		e.client.close()
 	}
@@ -124,21 +140,10 @@ func (r *Registry) List() []Info {
 // readSet はファイルを読み、各取得先の証明書を読み込んでクライアントを作る。
 // 証明書と鍵のパスが相対なら、登録簿のファイルのディレクトリから見る。
 func readSet(path string) (*set, error) {
-	data, err := os.ReadFile(path)
+	f, err := readFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read sources file: %w", err)
+		return nil, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	// 知らない項目は綴りの誤りとして拒否する
-	dec.DisallowUnknownFields()
-	var f fileFormat
-	if err := dec.Decode(&f); err != nil {
-		return nil, fmt.Errorf("parse sources file: %w", err)
-	}
-	if dec.More() {
-		return nil, errors.New("parse sources file: trailing data")
-	}
-
 	dir := filepath.Dir(path)
 	s := &set{byID: map[string]*entry{}}
 	var errs []error
@@ -161,22 +166,28 @@ func readSet(path string) (*set, error) {
 	return s, nil
 }
 
-func buildEntry(ef entryFormat, dir string) (*entry, error) {
-	if !idPattern.MatchString(ef.ID) {
-		return nil, errors.New("id must be 1-32 characters of a-z, 0-9 and - (not starting with -)")
+// readFile は登録簿のファイルを読む。知らない項目は綴りの誤りとして拒否する。
+func readFile(path string) (*fileFormat, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read sources file: %w", err)
 	}
-	baseURL, err := checkBaseURL(ef.BaseURL)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var f fileFormat
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("parse sources file: %w", err)
+	}
+	if dec.More() {
+		return nil, errors.New("parse sources file: trailing data")
+	}
+	return &f, nil
+}
+
+func buildEntry(ef entryFormat, dir string) (*entry, error) {
+	info, err := checkEntry(ef)
 	if err != nil {
 		return nil, err
-	}
-	timeout := defaultTimeout
-	if ef.Timeout != "" {
-		if timeout, err = time.ParseDuration(ef.Timeout); err != nil || timeout < minTimeout || timeout > maxTimeout {
-			return nil, fmt.Errorf("timeout must be a duration between %s and %s", minTimeout, maxTimeout)
-		}
-	}
-	if ef.ClientCertFile == "" || ef.ClientKeyFile == "" || ef.ServerCAFile == "" {
-		return nil, errors.New("clientCertFile, clientKeyFile and serverCaFile are required")
 	}
 	cert, err := tls.LoadX509KeyPair(resolve(dir, ef.ClientCertFile), resolve(dir, ef.ClientKeyFile))
 	if err != nil {
@@ -186,18 +197,90 @@ func buildEntry(ef entryFormat, dir string) (*entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := ef.Name
-	if name == "" {
-		name = ef.ID
-	}
-	info := Info{ID: ef.ID, Name: name, BaseURL: baseURL, Timeout: timeout}
 	if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
 		info.NotAfter = leaf.NotAfter
 	}
 	return &entry{
 		info:   info,
-		client: newClient(clientOptions{ID: ef.ID, BaseURL: baseURL, ClientCert: cert, ServerCAs: cas, Timeout: timeout}),
+		client: newClient(clientOptions{ID: ef.ID, BaseURL: info.BaseURL, ClientCert: cert, ServerCAs: cas, Timeout: info.Timeout}),
 	}, nil
+}
+
+// checkEntry は 1 件の形を確かめ、情報を返す（証明書と鍵のファイルは読まない）。
+func checkEntry(ef entryFormat) (Info, error) {
+	if !idPattern.MatchString(ef.ID) {
+		return Info{}, errors.New("id must be 1-32 characters of a-z, 0-9 and - (not starting with -)")
+	}
+	baseURL, err := checkBaseURL(ef.BaseURL)
+	if err != nil {
+		return Info{}, err
+	}
+	timeout := defaultTimeout
+	if ef.Timeout != "" {
+		if timeout, err = time.ParseDuration(ef.Timeout); err != nil || timeout < minTimeout || timeout > maxTimeout {
+			return Info{}, fmt.Errorf("timeout must be a duration between %s and %s", minTimeout, maxTimeout)
+		}
+	}
+	if ef.ClientCertFile == "" || ef.ClientKeyFile == "" || ef.ServerCAFile == "" {
+		return Info{}, errors.New("clientCertFile, clientKeyFile and serverCaFile are required")
+	}
+	name := ef.Name
+	if name == "" {
+		name = ef.ID
+	}
+	return Info{ID: ef.ID, Name: name, BaseURL: baseURL, Timeout: timeout}, nil
+}
+
+// ReadInfos は登録簿のファイルを読み、取得先の情報をファイルの順に返す。
+// admin（管理API）が加入者の取得先の ID を確かめるために使う（段階 2-3 の G4）。鍵のファイルは読まず、
+// クライアント証明書は期限を知るためだけに読む（読めなければ期限は空のまま）。形の誤りは LoadRegistry と同じく誤りにする。
+func ReadInfos(path string) ([]Info, error) {
+	f, err := readFile(path)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(path)
+	seen := map[string]bool{}
+	var out []Info
+	var errs []error
+	for i, ef := range f.Sources {
+		info, err := checkEntry(ef)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("sources[%d] (%q): %w", i, ef.ID, err))
+			continue
+		}
+		if seen[info.ID] {
+			errs = append(errs, fmt.Errorf("sources[%d]: duplicate id %q", i, ef.ID))
+			continue
+		}
+		seen[info.ID] = true
+		info.NotAfter = certNotAfter(resolve(dir, ef.ClientCertFile))
+		out = append(out, info)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// certNotAfter は PEM のファイルの最初の証明書の期限を返す（読めなければ空）。
+func certNotAfter(path string) time.Time {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}
+	}
+	for {
+		var block *pem.Block
+		if block, data = pem.Decode(data); block == nil {
+			return time.Time{}
+		}
+		if block.Type == "CERTIFICATE" {
+			if c, err := x509.ParseCertificate(block.Bytes); err == nil {
+				return c.NotAfter
+			}
+			return time.Time{}
+		}
+	}
 }
 
 // checkBaseURL は基底の URL が https://<ホスト>[:<ポート>]/…/nudm-ueau/v1 の形かを確かめる（契約 §5。平文の HTTP は使わない）。
