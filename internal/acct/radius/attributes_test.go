@@ -191,3 +191,23 @@ func TestExtractProxyStates(t *testing.T) {
 		t.Errorf("states[1] = %q, want %q", states[1], "proxy2")
 	}
 }
+
+func TestExtractAccountingAttributes_GigawordsTimestampCallingStation(t *testing.T) {
+	p := radiuspkg.New(radiuspkg.CodeAccountingRequest, []byte("s"))
+	u32 := func(v uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, v); return b }
+	p.Add(radiuspkg.Type(AttrTypeAcctStatusType), u32(AcctStatusTypeInterim))
+	p.Add(radiuspkg.Type(AttrTypeAcctSessionID), []byte("a"))
+	p.Add(radiuspkg.Type(AttrTypeAcctInputOct), u32(10))
+	p.Add(radiuspkg.Type(AttrTypeAcctInputGiga), u32(2))
+	p.Add(radiuspkg.Type(AttrTypeAcctOutputOct), u32(20))
+	p.Add(radiuspkg.Type(AttrTypeAcctOutputGiga), u32(1))
+	p.Add(radiuspkg.Type(AttrTypeEventTimestamp), u32(1_800_000_000))
+	p.Add(radiuspkg.Type(AttrTypeCallingStation), []byte("aa-bb-cc"))
+	a, err := ExtractAccountingAttributes(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.InputTotal() != 2<<32+10 || a.OutputTotal() != 1<<32+20 || a.EventTimestamp.Unix() != 1_800_000_000 || a.CallingStationID != "aa-bb-cc" {
+		t.Errorf("attrs = %+v", a)
+	}
+}

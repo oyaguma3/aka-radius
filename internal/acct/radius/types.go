@@ -1,5 +1,7 @@
 package radius
 
+import "time"
+
 // AccountingAttributes はAccounting-Requestから抽出された属性を表す
 type AccountingAttributes struct {
 	AcctStatusType  uint32   // Acct-Status-Type（1:Start, 2:Stop, 3:Interim, 7:On, 8:Off）
@@ -13,6 +15,26 @@ type AccountingAttributes struct {
 	OutputOctets    uint32   // Acct-Output-Octets
 	SessionTime     uint32   // Acct-Session-Time
 	ProxyStates     [][]byte // Proxy-State属性（複数可）
+
+	// InputGigawords・OutputGigawords は Acct-Input/Output-Gigawords（RFC 2869。2^32 オクテットの数）
+	InputGigawords  uint32
+	OutputGigawords uint32
+	// EventTimestamp は Event-Timestamp（RFC 2869。なければ空の時刻）
+	EventTimestamp time.Time
+	// CallingStationID は Calling-Station-Id（端末の MAC アドレスなど）
+	CallingStationID string
+	// Stamps はテナントの刻印（Vendor-Specific の値。ハンドラーが入れる。信頼の印は processor が確かめる）
+	Stamps [][]byte
+}
+
+// InputTotal は Gigawords を合わせた受信のオクテット数を返す。
+func (a *AccountingAttributes) InputTotal() uint64 {
+	return uint64(a.InputGigawords)<<32 | uint64(a.InputOctets)
+}
+
+// OutputTotal は Gigawords を合わせた送信のオクテット数を返す。
+func (a *AccountingAttributes) OutputTotal() uint64 {
+	return uint64(a.OutputGigawords)<<32 | uint64(a.OutputOctets)
 }
 
 // Acct-Status-Type値（RFC 2866）

@@ -2,7 +2,6 @@ package radius
 
 import (
 	"bytes"
-	"encoding/binary"
 	"net"
 	"testing"
 
@@ -247,30 +246,5 @@ func TestGetUserName(t *testing.T) {
 	}
 	if got != "0123456789012345@wlan.mnc001.mcc440.3gppnetwork.org" {
 		t.Errorf("GetUserName = %q", got)
-	}
-}
-
-func TestGetVendorAttributes(t *testing.T) {
-	p := radius.New(radius.CodeAccessRequest, []byte("s"))
-	vsa := func(vendor uint32, subs ...[]byte) radius.Attribute {
-		b := binary.BigEndian.AppendUint32(nil, vendor)
-		for _, s := range subs {
-			b = append(b, s...)
-		}
-		return b
-	}
-	sub := func(typ byte, val string) []byte { return append([]byte{typ, byte(len(val) + 2)}, val...) }
-	p.Add(rfc2865.VendorSpecific_Type, vsa(32473, sub(1, "42"), sub(2, "x")))
-	p.Add(rfc2865.VendorSpecific_Type, vsa(9, sub(1, "cisco")))          // 別の Vendor-Id
-	p.Add(rfc2865.VendorSpecific_Type, vsa(32473, sub(1, "7")))          // 2 つ目の刻印
-	p.Add(rfc2865.VendorSpecific_Type, vsa(32473, []byte{1, 0xff, 'a'})) // 長さが壊れている
-	p.Add(rfc2865.VendorSpecific_Type, radius.Attribute{0, 0})           // Vendor-Id が短い
-
-	got := GetVendorAttributes(p, 32473, 1)
-	if len(got) != 2 || string(got[0]) != "42" || string(got[1]) != "7" {
-		t.Fatalf("got %q", got)
-	}
-	if got := GetVendorAttributes(p, 32473, 3); len(got) != 0 {
-		t.Errorf("type 3: %q", got)
 	}
 }

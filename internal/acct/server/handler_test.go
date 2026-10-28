@@ -25,31 +25,27 @@ type mockProcessor struct {
 	onCalled      bool
 	offCalled     bool
 	lastTraceID   string
+	lastStamps    [][]byte
+	// err は Process が返す誤り（記録できないときは応答しない）
+	err error
 }
 
-func (m *mockProcessor) ProcessStart(_ context.Context, _ *radius.AccountingAttributes, _, traceID string) {
-	m.startCalled = true
+func (m *mockProcessor) Process(_ context.Context, a *radius.AccountingAttributes, _, traceID string) error {
+	switch a.AcctStatusType {
+	case radius.AcctStatusTypeStart:
+		m.startCalled = true
+	case radius.AcctStatusTypeInterim:
+		m.interimCalled = true
+	case radius.AcctStatusTypeStop:
+		m.stopCalled = true
+	case radius.AcctStatusTypeOn:
+		m.onCalled = true
+	case radius.AcctStatusTypeOff:
+		m.offCalled = true
+	}
 	m.lastTraceID = traceID
-}
-
-func (m *mockProcessor) ProcessInterim(_ context.Context, _ *radius.AccountingAttributes, _, traceID string) {
-	m.interimCalled = true
-	m.lastTraceID = traceID
-}
-
-func (m *mockProcessor) ProcessStop(_ context.Context, _ *radius.AccountingAttributes, _, traceID string) {
-	m.stopCalled = true
-	m.lastTraceID = traceID
-}
-
-func (m *mockProcessor) ProcessOn(_ context.Context, _ *radius.AccountingAttributes, _, traceID string) {
-	m.onCalled = true
-	m.lastTraceID = traceID
-}
-
-func (m *mockProcessor) ProcessOff(_ context.Context, _ *radius.AccountingAttributes, _, traceID string) {
-	m.offCalled = true
-	m.lastTraceID = traceID
+	m.lastStamps = a.Stamps
+	return m.err
 }
 
 // mockResponseWriter はテスト用のResponseWriter実装
@@ -73,7 +69,7 @@ func (m *mockAddr) String() string  { return m.addr }
 
 func TestNewHandler(t *testing.T) {
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	if h == nil {
 		t.Fatal("NewHandler returned nil")
 	}
@@ -149,7 +145,7 @@ func createStatusServerRequest(t *testing.T, secret []byte, withValidMA bool) *r
 func TestServeRADIUS_AccountingRequest_Start(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeStart)
 
@@ -169,7 +165,7 @@ func TestServeRADIUS_AccountingRequest_Start(t *testing.T) {
 func TestServeRADIUS_AccountingRequest_Stop(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeStop)
 
@@ -186,7 +182,7 @@ func TestServeRADIUS_AccountingRequest_Stop(t *testing.T) {
 func TestServeRADIUS_AccountingRequest_Interim(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeInterim)
 
@@ -203,7 +199,7 @@ func TestServeRADIUS_AccountingRequest_Interim(t *testing.T) {
 func TestServeRADIUS_InvalidAuthenticator(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeStart)
 
@@ -223,7 +219,7 @@ func TestServeRADIUS_InvalidAuthenticator(t *testing.T) {
 func TestServeRADIUS_MissingAttributes(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 
 	// 属性なしのパケット
@@ -259,7 +255,7 @@ func TestServeRADIUS_MissingAttributes(t *testing.T) {
 func TestServeRADIUS_UnknownStatusType(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, 99) // 未知のStatusType
 
@@ -276,7 +272,7 @@ func TestServeRADIUS_UnknownStatusType(t *testing.T) {
 func TestServeRADIUS_UnknownCode(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 
 	packet := &radiuspkg.Packet{
@@ -303,7 +299,7 @@ func TestServeRADIUS_UnknownCode(t *testing.T) {
 func TestServeRADIUS_StatusServer(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createStatusServerRequest(t, secret, true)
 
@@ -320,7 +316,7 @@ func TestServeRADIUS_StatusServer(t *testing.T) {
 func TestServeRADIUS_StatusServer_InvalidMA(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createStatusServerRequest(t, secret, false) // MAなし
 
@@ -334,7 +330,7 @@ func TestServeRADIUS_StatusServer_InvalidMA(t *testing.T) {
 func TestServeRADIUS_WriteError(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{writeErr: errors.New("write error")}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeStart)
 
@@ -349,7 +345,7 @@ func TestServeRADIUS_WriteError(t *testing.T) {
 func TestServeRADIUS_StatusServer_WriteError(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{writeErr: errors.New("write error")}
 	r := createStatusServerRequest(t, secret, true)
 
@@ -394,7 +390,7 @@ func createAccountingOnOffRequest(t *testing.T, secret []byte, statusType uint32
 func TestServeRADIUS_AccountingRequest_On(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingOnOffRequest(t, secret, radius.AcctStatusTypeOn)
 
@@ -414,7 +410,7 @@ func TestServeRADIUS_AccountingRequest_On(t *testing.T) {
 func TestServeRADIUS_AccountingRequest_Off(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingOnOffRequest(t, secret, radius.AcctStatusTypeOff)
 
@@ -434,7 +430,7 @@ func TestServeRADIUS_AccountingRequest_Off(t *testing.T) {
 func TestHandlerWithUDPAddress(t *testing.T) {
 	secret := []byte("testing123")
 	proc := &mockProcessor{}
-	h := NewHandler(proc)
+	h := NewHandler(proc, 32473, 1)
 	w := &mockResponseWriter{}
 	r := createAccountingRequest(t, secret, radius.AcctStatusTypeStart)
 
@@ -472,7 +468,7 @@ func TestServeRADIUS_StatusServer_LogLevel(t *testing.T) {
 			defer slog.SetDefault(prev)
 
 			secret := []byte("testing123")
-			NewHandler(&mockProcessor{}).ServeRADIUS(&mockResponseWriter{}, createStatusServerRequest(t, secret, tt.validMA))
+			NewHandler(&mockProcessor{}, 32473, 1).ServeRADIUS(&mockResponseWriter{}, createStatusServerRequest(t, secret, tt.validMA))
 
 			var entry struct {
 				Level   string `json:"level"`
@@ -485,5 +481,36 @@ func TestServeRADIUS_StatusServer_LogLevel(t *testing.T) {
 				t.Errorf("log = {%q, %q}, want {%q, %q}", entry.Level, entry.EventID, tt.wantLevel, tt.wantEventID)
 			}
 		})
+	}
+}
+
+func TestServeRADIUS_StampsAndRecordError(t *testing.T) {
+	secret := []byte("testing123")
+	build := func() *radiuspkg.Request {
+		r := createAccountingRequest(t, secret, radius.AcctStatusTypeInterim)
+		// テナントの刻印（Vendor-Id 32473 = 0x7ed9、Vendor-Type 1、値 "42"）を足して Authenticator を付け直す
+		r.Packet.Add(radiuspkg.Type(26), []byte{0, 0, 0x7e, 0xd9, 1, 4, '4', '2'})
+		data, _ := r.Packet.MarshalBinary()
+		copy(data[4:20], make([]byte, 16))
+		h := md5.New()
+		h.Write(data)
+		h.Write(secret)
+		copy(r.Packet.Authenticator[:], h.Sum(nil))
+		return r
+	}
+
+	proc := &mockProcessor{}
+	w := &mockResponseWriter{}
+	NewHandler(proc, 32473, 1).ServeRADIUS(w, build())
+	if len(proc.lastStamps) != 1 || string(proc.lastStamps[0]) != "42" || w.written == nil {
+		t.Fatalf("stamps = %q written = %v", proc.lastStamps, w.written != nil)
+	}
+
+	// 記録できなければ応答しない（NAS に送り直させる）
+	proc = &mockProcessor{err: errors.New("valkey down")}
+	w = &mockResponseWriter{}
+	NewHandler(proc, 32473, 1).ServeRADIUS(w, build())
+	if !proc.interimCalled || w.written != nil {
+		t.Errorf("called=%v written=%v, want no response", proc.interimCalled, w.written != nil)
 	}
 }

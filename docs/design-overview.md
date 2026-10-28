@@ -103,9 +103,10 @@
 | `cnt:src:{id}` | String | なし | 取得先ごとの加入者の数（登録・変更・削除の Lua で増減） | 新しく足す |
 | `client:{ip}`、`idx:client:{id}`、`seq:client` | Hash ほか | なし | RADIUS クライアント（`name`、`secret`、`trust_stamp`（`0`/`1`）、`created_at`） | `trust_stamp` を足し、`vendor` を外す |
 | `eap:{traceId}` | Hash | 60 秒 | EAP の会話の状態。本PoC の項目に、`tenant_id`、採ったルールの番号、`source_id`、`identity` を足す | 項目を足す |
-| `sess:{uuid}` | Hash | 24 時間（Interim で延ばす） | セッション。`imsi`、`tenant_id`、`nas_ip`（エッジ）、`nas_identifier`、`calling_station_id`、`start_time`、`acct_session_id`、Accounting の最後の累計（時間・送受信の量） | `tenant_id` と累計を足す |
+| `sess:{uuid}` | Hash | 24 時間（Start・Interim で延ばす） | セッション。`imsi`、`tenant_id`、`nas_ip`（エッジ）、`nas_identifier`、`calling_station_id`、`client_ip`、`acct_id`、`start_time`、`last_update`、Accounting の最後の累計（`seconds`・`input_octets`・`output_octets`。表示用） | `tenant_id` と累計を足す |
 | `idx:sess:imsi:{imsi}`、`idx:sess:tenant:{id}` | Sorted Set | なし | セッションの索引。スコアはセッションの期限の時刻で、読むときと定期の処理で期限を過ぎたものを消す | 本PoC の `idx:user:`（TTL も掃除もない Set）を置き換える |
-| `acct:seen:{nasIp}:{acctSessionId}` | String | 24 時間 | Accounting の重複の判定 | NAS ごとに分ける |
+| `acct:seen:{送信元の IP}:{NAS-Identifier か NAS-IP-Address}:{Acct-Session-Id}` | Hash | 24 時間（受けるたびに延ばす） | Accounting の重複の判定（最後の種類）と前回の累計（時間・送受信の量）、IMSI、テナント（段階 2-4 の J2・J3） | NAS ごとに分け、累計を持たせる |
+| `stat:sessions` | Hash | なし | acct が 1 時間ごとの掃除で数えたセッションの数と時刻（`/status`） | 新しく足す |
 | `usage:{yyyymmdd}:{tenantId}:{imsi}` | Hash | 8 日 | 利用の集計（§10） | 新しく足す |
 | `usage:idx:{yyyymmdd}` | Sorted Set | 8 日 | その日の集計のキーの索引（取り出しのページ送り） | 新しく足す |
 | `audit` | Stream | 件数の上限 | 管理API とコマンドの監査ログ | `audit:prov` を改める |
@@ -231,14 +232,14 @@
 | `seconds` | Interim・Stop | Acct-Session-Time の前回の累計からの増分 |
 | `in_octets`、`out_octets` | Interim・Stop | Acct-Input/Output-Octets と Gigawords（× 2^32）を合わせた値の、前回の累計からの増分 |
 
-- 前回の累計はセッションに持ち、増分の計算・累計の更新・集計への足し込みを 1 つの Lua で原子的に行う。同じ値の再送は増分が 0 になるので、数え直しにならない。累計が減ったとき（NAS の作り直しなど）は、その値をそのまま増分とみなし、ログに出す。
+- 前回の累計は重複の判定のキー（`acct:seen:…`）に持ち、重複の判定・増分の計算・累計の更新・集計への足し込み・セッションと索引の更新を 1 つの Lua で原子的に行う（段階 2-4 の J2 で、セッションに持つ案から改めた。Class がない・セッションが消えている Accounting でも増分を計算できるように）。同じ値の再送は増分が 0 になるので、数え直しにならない。累計が減ったとき（NAS の作り直しなど）は、その値をそのまま増分とみなし、ログに出す（`USAGE_COUNTER_RESET`）。
 - 日は Event-Timestamp があればその時刻、なければ受け取った時刻の、日本時間の日付。キーは `usage:{yyyymmdd}:{tenantId}:{imsi}` で、8 日で消える（7 日分を取り出せるように 1 日余裕を持たせる）。
 - 刻印のないパケットはテナントの ID を `0` として集計し、ログに出す（エッジを通らないパケットは来ない前提だが、取りこぼしを見えるようにする）。
 - 本PoC の acct が持たなかった Gigawords と Event-Timestamp を扱うようにする。
 
 ### 10.3 Accounting の重複の判定
 
-- `acct:seen:{nasIp}:{acctSessionId}` に最後の種類（`start` / `interim` / `stop`）を持ち、判定と更新を 1 つの Lua で行う（本PoC は GET と SET の 2 回で、原子的でなかった）。
+- `acct:seen:…`（§6.1）に最後の種類（`start` / `interim` / `stop`）を持ち、判定と更新を §10.2 の 1 つの Lua で行う（本PoC は GET と SET の 2 回で、原子的でなかった）。
 - 判定の規則（Start の重複、Stop の後の Interim など）は本PoC の D-10 のまま。
 
 ## 11. 管理API（9444、mTLS）
@@ -290,7 +291,7 @@
 ## 13. ログと監査ログ
 
 - ログの経路は本PoC のまま、Docker のログドライバー `fluentd` から Fluent Bit に送り、アプリごとのファイルに書く（§18 の C10）。ホストの logrotate で日ごとに圧縮し、ノードで 2 週間持つ（本PoC は 30 世代）。監視用の PC が取りに行く（概要 §13）。データ面の aka-vecgen も同じ Fluent Bit に送る。
-- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`・`AUTH_STAMP_LOOKUP_ERR`、`AUTH_SUBSCRIBER_INVALID`・`AUTH_SUBSCRIBER_LOOKUP_ERR`、`EAP_IDENTITY_MISMATCH`、`AUTH_DUPLICATE_REPLAYED`・`ACCT_DUPLICATE_REPLAYED`、`RADIUS_OVERLOAD`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`。
+- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`・`AUTH_STAMP_LOOKUP_ERR`、`AUTH_SUBSCRIBER_INVALID`・`AUTH_SUBSCRIBER_LOOKUP_ERR`、`EAP_IDENTITY_MISMATCH`、`AUTH_DUPLICATE_REPLAYED`・`ACCT_DUPLICATE_REPLAYED`、`RADIUS_OVERLOAD`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`・`USAGE_WRITE_ERR`、`ACCT_TENANT_UNKNOWN`・`ACCT_IMSI_UNKNOWN`・`ACCT_USAGE_TOO_OLD`・`ACCT_EVENT_TIMESTAMP_FUTURE`・`ACCT_STAMP_MULTIPLE`・`ACCT_STAMP_INVALID`・`ACCT_STAMP_LOOKUP_ERR`、`SESSION_SWEPT`・`SESSION_SWEEP_ERR`。
 - `RADIUS_LOG_MASK_IMSI` の既定を `false` にする（決定事項 26）。
 - 監査ログは Valkey の Stream（件数の上限つき）と、日ごとの追記だけの JSONL のファイル（`RADIUS_AUDIT_DIR`）に書く（aka-vecgen の決定事項 9）。本PoC の「標準出力が正本、Stream が写し」と、Admin-TUI のリダイレクト頼みの監査ログは、この 1 系統にまとめる。
 
@@ -332,7 +333,7 @@
 | 2-1 | 1 つのモジュールと 1 つのコマンドにまとめ、Admin-TUI と vector-api を外す。auth と acct の共通の部分をまとめる（Gin はこの手順では外さない。2-2 と 2-3 で口ごと消える） | 単体、ビルド |
 | 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7。gateway の Gin が消える） | 単体、aka-vecgen との結合、検証機での最初の通し（eapaka_test で EAP-AKA・EAP-AKA'・再同期） |
 | 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限、管理API 2.0.0 の加入者の口（provisioning-api を置き換える。Gin がすべて消える） | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-3 で決めたこと」 |
-| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合 |
+| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-4 で決めたこと」 |
 | 2-5 | 管理API 2.0.0 の残り（RADIUS クライアントと取得先の読み出し）、コマンド、ピンのファイル、監査ログの書き出し、healthcheck、共有のネットワークの名前 `eapaka-prov` を決め直す | 結合 |
 | 2-6 | D-文書の改版、運用ガイド、README | 検証機で全体を通す（刻印はエッジの代わりの radsecproxy で付け、Accounting は radclient で送る） |
 
@@ -356,6 +357,22 @@
 - G11: §11.1 の `cause` の名前を直した。
 - G12: OpenAPI は `docs/openapi/admin-api.yaml`（2.0.0-draft）。`provisioning-api.yaml` は D-13 と一緒に 2-6 で廃止の記録をする。刻印を付けた通しは 2-6（エッジの代わりの radsecproxy）。
 - そのほか: IMSI は本PoC と同じ 15 桁、ルールの値の範囲（NAS-Identifier 253 バイト、SSID 32 バイト・32 個、VLAN 1〜4094、Session-Timeout 1〜86400 秒）も本PoC と同じ。SSID の `*` はほかの SSID と混ぜられない。`/status` に取得先ごとの加入者の数を出す（遮断器の状態は auth の中にあるので 2-5 で決める）。
+
+段階 2-4 で決めたこと（2026-10-28。確認事項 J1〜J12 はすべて推奨案で合意）:
+
+- J1: 1 つの feature ブランチと 1 つの PR にした。
+- J2: 前回の累計を、セッションではなく重複の判定のキー（`acct:seen:…`。Hash）に持つ（§10.2 を改めた）。1 つの Accounting につき 1 つの Lua（`internal/acct/store` の `accountScript`）で、重複の判定・増分・累計の更新・集計への足し込み・セッションと索引の更新を行う。
+- J3: 重複の判定のキーは `acct:seen:{送信元の IP}:{NAS-Identifier（なければ NAS-IP-Address）}:{Acct-Session-Id}`（エッジの奥の AP の間で Acct-Session-Id が重ならないように）。
+- J4: 増分は今回の累計から前回の累計を引いたもの。Start の重複・Stop の後の Stop・同じ値の Interim は数えない。累計が減ったら、その値をそのまま増分にする。順序の誤り（`no_start_received`・`interim_after_stop`・`start_after_stop`）はログを出して数える。Stop の後の Start は 0 から数え直す。
+- J5: 日は Event-Timestamp（受け取った時刻より 1 時間以上先なら受け取った時刻。`ACCT_EVENT_TIMESTAMP_FUTURE`）の日本時間の日付。7 日より前の日には足し込まない（`ACCT_USAGE_TOO_OLD`）。集計のキーは、その日の始まりから 8 日で消える。
+- J6: テナントは、信頼する刻印 → 重複の判定のキーに残したテナント → セッションのテナントの順。どれもなければ `0`（`ACCT_TENANT_UNKNOWN`）。IMSI は、セッション → 重複の判定のキー → User-Name の永続 ID の順。分からなければ集計しない（`ACCT_IMSI_UNKNOWN`）。
+- J7: auth は Access-Accept で集計に `auth_ok` を 1 足す（`internal/usage`。書けなくても Accept を返し、`USAGE_WRITE_ERR`）。
+- J8: セッションと索引は `internal/sessions`（auth・acct・admin で共通）。auth が Accept で作って索引に足し、acct が Start・Interim で期限を延ばし、Stop で消す。acct が起動のときと 1 時間ごとに期限切れの索引を消す（`SESSION_SWEPT`）。本PoC の `idx:user:` はなくした。
+- J9: `GET /sessions` は `tenantId` か `imsi`（カンマ区切り 100 件まで）のどちらか 1 つが必須。期限の早い順、1 ページ 1,000 件まで、カーソルは位置。
+- J10: `GET /usage` は `date`（日本時間の `YYYY-MM-DD`）が必須。テナントと IMSI の辞書順、1 ページ 1,000 件まで。
+- J11: `/status` に、acct が数えたセッションの数と時刻を出す（`sessionCount`・`sessionsCountedAt`）。
+- J12: Accounting-On/Off はログだけ。acct の試験は、gomock をやめて偽物と miniredis で書き直した（`internal/acct/mocks` を消した）。
+- そのほか: acct は、記録できない（Valkey に書けない）ときは Accounting-Response を返さない（NAS に送り直させて、利用の集計の取りこぼしを防ぐ。本PoC は書けなくても応答していた）。acct も刻印の Vendor-Id・Vendor-Type（`RADIUS_STAMP_VENDOR_ID`・`RADIUS_STAMP_VENDOR_TYPE`）を読む。累計は Lua の数（倍精度）で扱うので、1 つのセッションで 2^53 オクテット（約 9 PB）までは正確。
 
 ### 17.2 D-文書の扱い（S4）
 

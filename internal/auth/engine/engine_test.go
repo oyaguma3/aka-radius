@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oyaguma3/aka-radius/internal/auth/config"
 	"github.com/oyaguma3/aka-radius/internal/auth/eap"
@@ -18,6 +20,7 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/envconf"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
 	eapaka "github.com/oyaguma3/go-eapaka"
 )
@@ -128,28 +131,31 @@ func (f *fakeCtxStore) set(id, key string, v any) {
 
 // fakeSessStore はメモリーのセッション。
 type fakeSessStore struct {
-	sessions  map[string]*session.Session
+	sessions  map[string]sessions.Session
 	createErr error
-	indexErr  error
 }
 
-func (f *fakeSessStore) Create(_ context.Context, id string, s *session.Session) error {
+func (f *fakeSessStore) Create(_ context.Context, s sessions.Session, _ time.Time) error {
 	if f.createErr != nil {
 		return f.createErr
 	}
-	f.sessions[id] = s
+	f.sessions[s.ID] = s
 	return nil
 }
 
-func (f *fakeSessStore) Get(_ context.Context, id string) (*session.Session, error) {
-	s, ok := f.sessions[id]
-	if !ok {
-		return nil, session.ErrSessionNotFound
-	}
-	return s, nil
+// fakeUsage は利用の集計。
+type fakeUsage struct {
+	authOK map[string]int
+	err    error
 }
 
-func (f *fakeSessStore) AddUserIndex(context.Context, string, string) error { return f.indexErr }
+func (f *fakeUsage) AddAuthOK(_ context.Context, _ time.Time, tenantID int64, imsi string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.authOK[fmt.Sprintf("%d:%s", tenantID, imsi)]++
+	return nil
+}
 
 // fakeSubs はメモリーの加入者。
 type fakeSubs struct {
@@ -195,6 +201,7 @@ type testEnv struct {
 	eng     *EngineImpl
 	ctx     *fakeCtxStore
 	sess    *fakeSessStore
+	usage   *fakeUsage
 	subs    *fakeSubs
 	fetcher *fakeFetcher
 	trust   *fakeTrust
@@ -204,8 +211,9 @@ type testEnv struct {
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	env := &testEnv{
-		ctx:  &fakeCtxStore{m: map[string]map[string]any{}},
-		sess: &fakeSessStore{sessions: map[string]*session.Session{}},
+		ctx:   &fakeCtxStore{m: map[string]map[string]any{}},
+		sess:  &fakeSessStore{sessions: map[string]sessions.Session{}},
+		usage: &fakeUsage{authOK: map[string]int{}},
 		subs: &fakeSubs{m: map[string]subscriber.Subscriber{testIMSI: {
 			IMSI: testIMSI, State: subscriber.StateActive, SourceID: testSourceID,
 			Rules: []subscriber.Rule{
@@ -218,7 +226,7 @@ func newEnv(t *testing.T) *testEnv {
 		stamps:  [][]byte{[]byte("42")},
 	}
 	cfg := &config.Config{NetworkName: testNetworkName, Common: envconf.Common{LogMaskIMSI: false}}
-	env.eng = NewEngine(env.fetcher, env.ctx, env.sess, env.subs, env.trust, cfg)
+	env.eng = NewEngine(env.fetcher, env.ctx, env.sess, env.usage, env.subs, env.trust, cfg)
 	return env
 }
 
@@ -344,8 +352,12 @@ func TestEngine_FullAuth(t *testing.T) {
 			if res.VlanID != "100" || res.SessionTimeout != 3600 || len(res.MSK) != 64 {
 				t.Errorf("accept = %+v", res)
 			}
-			if s := env.sess.sessions[res.SessionID]; s == nil || s.TenantID != testTenant || s.IMSI != testIMSI || s.NasIP != testSrcIP {
+			if s, ok := env.sess.sessions[res.SessionID]; !ok || s.TenantID != testTenant || s.IMSI != testIMSI || s.NasIP != testSrcIP || s.NasIdentifier != testNASID {
 				t.Errorf("session = %+v", s)
+			}
+			// 利用の集計に認証の成功を 1 足す（段階 2-4 の J7）
+			if n := env.usage.authOK[fmt.Sprintf("%d:%s", testTenant, testIMSI)]; n != 1 {
+				t.Errorf("auth_ok = %d", n)
 			}
 			if _, err := env.ctx.Get(context.Background(), testTraceID); err == nil {
 				t.Error("context remains after Accept")
@@ -579,14 +591,16 @@ func TestEngine_ChallengeFailures(t *testing.T) {
 		})
 	}
 
-	t.Run("索引に足せなくても Accept", func(t *testing.T) {
+	t.Run("利用の集計に書けなくても Accept", func(t *testing.T) {
+		logs := captureLogs(t)
 		env := newEnv(t)
 		_, kAut := env.startChallenge(t, identity)
-		env.sess.indexErr = errors.New("valkey down")
+		env.usage.err = errors.New("valkey down")
 		res := env.eng.Process(context.Background(), env.request(identity, challengeResp(t, 2, eapaka.TypeAKA, kAut, testXRES), testTraceID))
 		if res.Action != eap.ActionAccept {
 			t.Fatalf("result = %+v", res)
 		}
+		wantLog(t, logs, "USAGE_WRITE_ERR")
 	})
 
 	t.Run("VLAN のないルール", func(t *testing.T) {
@@ -758,13 +772,5 @@ func TestEngine_VectorErrorLogs(t *testing.T) {
 				t.Error("context remains")
 			}
 		})
-	}
-}
-
-func TestIsDecimal(t *testing.T) {
-	for in, want := range map[string]bool{"42": true, "0": true, "": false, "+1": false, "-1": false, "4 2": false, "٤٢": false} {
-		if got := isDecimal([]byte(in)); got != want {
-			t.Errorf("isDecimal(%q) = %v", in, got)
-		}
 	}
 }

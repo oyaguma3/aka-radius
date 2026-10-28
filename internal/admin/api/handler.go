@@ -18,7 +18,9 @@ import (
 
 	"github.com/oyaguma3/aka-radius/internal/admin/audit"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/oyaguma3/aka-radius/internal/usage"
 )
 
 // Version は管理API の版（/status の version）。
@@ -34,10 +36,12 @@ type Sources interface {
 
 // Handler は管理API のハンドラー。
 type Handler struct {
-	Subs    *subscriber.Store
-	Sources Sources
-	Audit   *audit.Recorder
-	Log     *slog.Logger
+	Subs     *subscriber.Store
+	Sessions *sessions.Store
+	Usage    *usage.Store
+	Sources  Sources
+	Audit    *audit.Recorder
+	Log      *slog.Logger
 	// MgmtClient はリクエストから管理クライアントの識別名を取り出す。
 	MgmtClient func(*http.Request) string
 	// AdminClients は管理クライアントの識別名の一覧（/status）。
@@ -51,7 +55,7 @@ type Handler struct {
 }
 
 // Routes は管理API のルーティングを返す。
-// 段階 2-3 では加入者の口と /status・/audit-logs だけ。/sessions・/usage は 2-4、/clients・/sources は 2-5 で足す。
+// /clients・/sources は段階 2-5 で足す。
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/v2/status", h.getStatus)
@@ -64,6 +68,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("DELETE /admin/v2/subscribers/{imsi}", h.deleteSubscriber)
 	mux.HandleFunc("PUT /admin/v2/subscribers/{imsi}/state", h.setSubscriberState)
 	mux.HandleFunc("POST /admin/v2/subscribers/{imsi}/reinstate", h.reinstateSubscriber)
+
+	mux.HandleFunc("GET /admin/v2/sessions", h.listSessions)
+	mux.HandleFunc("GET /admin/v2/usage", h.listUsage)
 
 	mux.HandleFunc("GET /admin/v2/audit-logs", h.listAuditLogs)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

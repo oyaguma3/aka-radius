@@ -15,6 +15,8 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/logging"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
 	eapaka "github.com/oyaguma3/go-eapaka"
 )
@@ -30,21 +32,35 @@ type StampTrust interface {
 	TrustsStamp(ctx context.Context, ip string) (bool, error)
 }
 
+// SessionCreator はセッションを作り、IMSI とテナントの索引に足す（sessions.Store）。
+type SessionCreator interface {
+	Create(ctx context.Context, s sessions.Session, now time.Time) error
+}
+
+// UsageRecorder は利用の集計に認証の成功を足す（usage.Store。課金レコード §5.2）。
+type UsageRecorder interface {
+	AddAuthOK(ctx context.Context, now time.Time, tenantID int64, imsi string) error
+}
+
 // EngineImpl はeap.EAPProcessorの実装
 type EngineImpl struct {
 	vectorClient source.Fetcher
 	ctxStore     session.ContextStore
-	sessStore    session.SessionStore
+	sessStore    SessionCreator
+	usage        UsageRecorder
 	subs         SubscriberReader
 	trust        StampTrust
 	cfg          *config.Config
+	// now は現在時刻を返す（試験用）。
+	now func() time.Time
 }
 
 // NewEngine は新しいEAPエンジンを生成する
 func NewEngine(
 	vc source.Fetcher,
 	cs session.ContextStore,
-	ss session.SessionStore,
+	ss SessionCreator,
+	us UsageRecorder,
 	subs SubscriberReader,
 	trust StampTrust,
 	cfg *config.Config,
@@ -53,9 +69,11 @@ func NewEngine(
 		vectorClient: vc,
 		ctxStore:     cs,
 		sessStore:    ss,
+		usage:        us,
 		subs:         subs,
 		trust:        trust,
 		cfg:          cfg,
+		now:          time.Now,
 	}
 }
 
@@ -435,8 +453,8 @@ func (e *EngineImpl) readStamp(ctx context.Context, req *eap.Request, traceID, m
 		)
 		return 0, false
 	}
-	tenantID, err := strconv.ParseInt(string(stamps[0]), 10, 64)
-	if err != nil || tenantID < 1 || !isDecimal(stamps[0]) {
+	tenantID, ok := radiussrv.ParseTenantStamp(stamps[0])
+	if !ok {
 		slog.Warn("刻印の値が10進の数でない",
 			"event_id", "AUTH_STAMP_INVALID",
 			"trace_id", traceID,
@@ -447,16 +465,6 @@ func (e *EngineImpl) readStamp(ctx context.Context, req *eap.Request, traceID, m
 		return 0, false
 	}
 	return tenantID, true
-}
-
-// isDecimal は b が 10 進の数字だけかを返す（strconv.ParseInt が受ける `+` を断る）。
-func isDecimal(b []byte) bool {
-	for _, c := range b {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(b) > 0
 }
 
 // requestVectorAndBuildChallenge はVector取得→鍵導出→Challenge構築を行う
@@ -714,16 +722,16 @@ func (e *EngineImpl) handleChallengeResponse(ctx context.Context, req *eap.Reque
 		return e.buildReject(pkt.Identifier + 1)
 	}
 
-	// セッション作成
+	// セッション作成（IMSI とテナントの索引にも足す。MVP の設計概要 §10.1）
+	now := e.now()
 	sessionID := session.GenerateSessionID()
-	sess := &session.Session{
+	if err := e.sessStore.Create(ctx, sessions.Session{
+		ID:            sessionID,
 		IMSI:          eapCtx.IMSI,
 		TenantID:      eapCtx.TenantID,
 		NasIP:         req.SrcIP,
 		NasIdentifier: req.NASIdentifier,
-		StartTime:     time.Now().Unix(),
-	}
-	if err := e.sessStore.Create(ctx, sessionID, sess); err != nil {
+	}, now); err != nil {
 		slog.Error("セッション作成失敗",
 			"event_id", "SESSION_CREATE_ERR",
 			"trace_id", traceID,
@@ -731,13 +739,13 @@ func (e *EngineImpl) handleChallengeResponse(ctx context.Context, req *eap.Reque
 		)
 		return e.buildReject(pkt.Identifier + 1)
 	}
-	if err := e.sessStore.AddUserIndex(ctx, eapCtx.IMSI, sessionID); err != nil {
-		slog.Warn("ユーザーインデックス追加失敗",
-			"event_id", "SESSION_INDEX_ERR",
+	// 利用の集計に認証の成功を 1 足す。書けなくても Accept は返す（段階 2-4 の J7）
+	if err := e.usage.AddAuthOK(ctx, now, eapCtx.TenantID, eapCtx.IMSI); err != nil {
+		slog.Error("利用の集計に認証の成功を足せない",
+			"event_id", "USAGE_WRITE_ERR",
 			"trace_id", traceID,
 			"error", err,
 		)
-		// インデックス失敗は致命的ではない
 	}
 
 	// EAPContext削除

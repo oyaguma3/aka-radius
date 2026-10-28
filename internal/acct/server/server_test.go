@@ -61,7 +61,7 @@ func startTestServer(t *testing.T, proc *mockProcessor, secret []byte) (net.Conn
 		t.Fatalf("ListenPacket failed: %v", err)
 	}
 
-	s := radiussrv.NewServer(pc.LocalAddr().String(), NewHandler(proc), radiuspkg.StaticSecretSource(secret))
+	s := radiussrv.NewServer(pc.LocalAddr().String(), NewHandler(proc, 32473, 1), radiuspkg.StaticSecretSource(secret))
 	go func() { _ = s.Serve(pc) }()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)

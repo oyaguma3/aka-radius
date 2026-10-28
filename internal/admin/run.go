@@ -1,5 +1,5 @@
 // Package admin はサブコマンド admin（管理API 2.0.0。/admin/v2）の入口（MVP の設計概要 §11）。
-// 本PoC の Provisioning API（/admin/v1、Gin）を置き換える。段階 2-3 では加入者の口と /status・/audit-logs を持つ。
+// 本PoC の Provisioning API（/admin/v1、Gin）を置き換える。加入者の口（段階 2-3）、/sessions・/usage（2-4）を持つ。
 package admin
 
 import (
@@ -23,7 +23,9 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/admin/config"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/logging"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/oyaguma3/aka-radius/internal/usage"
 	"github.com/oyaguma3/aka-radius/internal/valkey"
 )
 
@@ -80,6 +82,8 @@ func Main(build string) {
 	// 5. ハンドラー
 	h := &api.Handler{
 		Subs:            subscriber.NewStore(rdb),
+		Sessions:        sessions.NewStore(rdb),
+		Usage:           usage.NewStore(rdb),
 		Sources:         sources,
 		Audit:           audit.NewRecorder(rdb, cfg.AuditMax, log),
 		Log:             log,

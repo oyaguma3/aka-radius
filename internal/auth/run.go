@@ -18,7 +18,9 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/store"
 	"github.com/oyaguma3/aka-radius/internal/logging"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/oyaguma3/aka-radius/internal/usage"
 )
 
 // Main はサブコマンド auth を動かす。build はビルドの版（起動ログの build に出す）。
@@ -110,7 +112,8 @@ func newServer(cfg *config.Config, valkeyClient *store.ValkeyClient, registry *s
 	eapEngine := engine.NewEngine(
 		fetcher,
 		session.NewContextStore(valkeyClient),
-		session.NewSessionStore(valkeyClient),
+		sessions.NewStore(valkeyClient.Client()),
+		usage.NewStore(valkeyClient.Client()),
 		subs,
 		radiussrv.NewStampTrust(valkeyClient.Client()),
 		cfg,

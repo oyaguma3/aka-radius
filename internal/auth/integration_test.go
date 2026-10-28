@@ -16,7 +16,9 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/store"
 	"github.com/oyaguma3/aka-radius/internal/envconf"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/oyaguma3/aka-radius/internal/usage"
 	eapaka "github.com/oyaguma3/go-eapaka"
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
@@ -489,6 +491,16 @@ func TestIntegration_AcceptAttributesAndSession(t *testing.T) {
 	}
 	if !found {
 		t.Error("no session")
+	}
+	// IMSI とテナントの索引に足し、利用の集計に認証の成功を 1 足す（段階 2-4 の J7・J8）
+	if m, _ := env.mr.ZMembers(sessions.IMSIIndexKey(itIMSI)); len(m) != 1 {
+		t.Errorf("imsi index = %v", m)
+	}
+	if m, _ := env.mr.ZMembers(sessions.TenantIndexKey(itTenant)); len(m) != 1 {
+		t.Errorf("tenant index = %v", m)
+	}
+	if got := env.mr.HGet(usage.Key(usage.Day(time.Now()), itTenant, itIMSI), usage.FieldAuthOK); got != "1" {
+		t.Errorf("auth_ok = %q", got)
 	}
 
 	// 最後の要求の再送には、同じ Access-Accept を送り直す（重複応答のキャッシュ。MVP の設計概要 §9）
