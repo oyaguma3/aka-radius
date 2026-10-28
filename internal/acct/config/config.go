@@ -19,6 +19,9 @@ type Config struct {
 	ListenAddr string
 	// Guard は要求の期限と同時に処理する上限（RADIUS_REQUEST_TIMEOUT、RADIUS_MAX_INFLIGHT）
 	Guard radiussrv.GuardConfig
+	// StampVendorID・StampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（auth と同じ環境変数）
+	StampVendorID   uint32
+	StampVendorType byte
 }
 
 // Load は環境変数から設定を読み込む
@@ -31,10 +34,16 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	vendorID, vendorType, err := envconf.StampVendor()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
-		Common:         common,
-		FallbackSecret: envconf.String("RADIUS_FALLBACK_SECRET", ""),
-		ListenAddr:     envconf.String("RADIUS_ACCT_LISTEN_ADDR", ":1813"),
-		Guard:          guard,
+		Common:          common,
+		FallbackSecret:  envconf.String("RADIUS_FALLBACK_SECRET", ""),
+		ListenAddr:      envconf.String("RADIUS_ACCT_LISTEN_ADDR", ":1813"),
+		Guard:           guard,
+		StampVendorID:   vendorID,
+		StampVendorType: vendorType,
 	}, nil
 }

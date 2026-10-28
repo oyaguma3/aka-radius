@@ -5,6 +5,7 @@
 - 段階 2-1 は済み: 1 つのモジュールとコマンド `aka-radius`（サブコマンド `auth`・`acct`・`admin`）、vector-api と Admin-TUI の廃止、auth と acct の共通部分（`internal/radiussrv`）、環境変数の接頭辞 `RADIUS_`（`internal/envconf`）、IMSI のマスクの既定 `false`。admin の Gin は 2-3 で外す。
 - 段階 2-2 は済み: vector-gateway を auth に取り込んだ（`internal/auth/source`。取得先の登録簿 `RADIUS_SOURCES_FILE` を `SIGHUP` で読み直す、取得先ごとの mTLS の接続と遮断器、契約 R1〜R7、再同期は 1 回まで）。取得先は `sub:{imsi}` の `source_id`（2-3 で加入者の口を作るまでは Valkey に直接入れる）。登録簿と証明書は `deployments/sources/` をディレクトリごとマウントする。結合試験は `internal/auth/integration_test.go`（偽の取得先は `internal/auth/source/sourcetest`）。
 - 段階 2-3 は済み: 加入者（`internal/subscriber`。状態・取得先・ルールを `sub:` 1 つに、索引 `subs`、取得先ごとの数 `cnt:src:{id}`、Lua で原子的に）、ベクターを取る前の判定（有無 → 状態 → 刻印 → ルール。Accept の前に状態をもう一度）、テナントの刻印（VSA と `client:{ip}` の `trust_stamp`）、IMSI を EAP の Identity から、重複応答のキャッシュ・要求の期限・同時処理の上限（`radiussrv.Guard`。auth と acct）、管理API 2.0.0（`internal/admin/api`、`net/http`、`/admin/v2`。Gin を外した）。決めたことは設計概要 §17.1 の「段階 2-3 で決めたこと」（G1〜G12）。RADIUS クライアントは 2-5 のコマンドまで Valkey に直接書く。エンジンの単体試験はメモリーの偽物（gomock を使うのは auth/server のハンドラーの試験だけ）。
+- 段階 2-4 は済み: Accounting の作り直し（`internal/acct/store` の 1 つの Lua で、重複の判定・前回の累計からの増分・利用の集計・セッションと索引の更新。前回の累計は `acct:seen:{送信元}:{NAS}:{Acct-Session-Id}` に持つ）、利用の集計（`internal/usage`。auth が `auth_ok` を足す）、セッションと索引（`internal/sessions`。auth・acct・admin で共通、acct が 1 時間ごとに掃除）、管理API の `/sessions`・`/usage`。決めたことは設計概要 §17.1 の「段階 2-4 で決めたこと」（J1〜J12）。acct の試験は偽物と miniredis（`internal/acct/mocks` を消した）。
 - D-文書は 2-6 でまとめて改版する。それまでは設計概要を正とし、D-文書に残る PoC の名前と作り（`apps/`、`pkg/`、`go.work`、Admin-TUI、vector-api など）は読み替える。
 EAP-AKA/AKA' の RADIUS サーバー。Wi-Fi認証（WPA2/WPA3-Enterprise）向け。RADIUS認証機能・課金機能と管理API を持つ。
 
@@ -44,7 +45,7 @@ EAP-AKA/AKA' の RADIUS サーバー。Wi-Fi認証（WPA2/WPA3-Enterprise）向�
 - go.mod の依存関係を変更する前に、変更をリセットする可能性のある git フックやリンターがないか確認する。
 - 変更後は `git diff go.mod` で変更が保持されていることを確認する。
 - Goパッケージを再構築する際は、実装コードを書く前に `make build`（`go build ./...`）を実行して循環インポートを早期にチェックする。
-- モック（`internal/{auth,acct}/mocks`）は mockgen v0.6.0 でリポジトリの直下から作る（例: `mockgen -source=internal/auth/eap/types.go -destination=internal/auth/mocks/eap_mock.go -package=mocks`）。
+- モック（`internal/auth/mocks`。acct は段階 2-4 でなくした）は mockgen v0.6.0 でリポジトリの直下から作る（例: `mockgen -source=internal/auth/eap/types.go -destination=internal/auth/mocks/eap_mock.go -package=mocks`）。
 
 ## ビルド・静的解析
 - 1 つのモジュールなので、Makefile は `./...` で全体を扱う（段階 2-1 で Go Workspace をやめた）。
@@ -81,6 +82,8 @@ EAP-AKA/AKA' の RADIUS サーバー。Wi-Fi認証（WPA2/WPA3-Enterprise）向�
 ## 共有パッケージ（internal/。もとの pkg/）
 - `internal/logging.MaskIMSI` — IMSIマスキング（D-04仕様: 先頭6桁+末尾1桁）
 - `internal/subscriber` — 加入者（`sub:`・`subs`・`cnt:src:{id}`）の Valkey 読み書き（Lua で原子的）とルールの評価。auth と admin で共通
+- `internal/sessions` — セッション（`sess:`）と索引（`idx:sess:imsi:`・`idx:sess:tenant:`）。auth・acct・admin で共通
+- `internal/usage` — 利用の集計（`usage:{日}:{テナント}:{IMSI}`・`usage:idx:{日}`）。日本時間の日の割り当て
 - `internal/radiussrv` — auth と acct の RADIUS の受け口（待ち受けとパニックの回復、共有シークレットの解決、刻印の信頼の印、Message-Authenticator、Proxy-State、Status-Server、停止のシグナルの処理、`Guard`（重複応答のキャッシュ・要求の期限・同時処理の上限））
 - `internal/envconf` — 環境変数の読み込み（`RADIUS_` の共通の設定。Valkey とログ）
 - 各サブコマンドで重複実装せず、共有パッケージをimportして利用すること

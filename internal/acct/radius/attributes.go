@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"time"
 
 	"github.com/google/uuid"
 	"layeh.com/radius"
@@ -22,6 +23,10 @@ const (
 	AttrTypeAcctOutputOct   = 43
 	AttrTypeAcctSessionID   = 44
 	AttrTypeAcctSessionTime = 46
+	AttrTypeCallingStation  = 31
+	AttrTypeAcctInputGiga   = 52
+	AttrTypeAcctOutputGiga  = 53
+	AttrTypeEventTimestamp  = 55
 )
 
 // 属性抽出エラー
@@ -100,6 +105,26 @@ func ExtractAccountingAttributes(packet *radius.Packet) (*AccountingAttributes, 
 	timeAttr := packet.Get(radius.Type(AttrTypeAcctSessionTime))
 	if len(timeAttr) >= 4 {
 		attrs.SessionTime = binary.BigEndian.Uint32(timeAttr)
+	}
+
+	// Acct-Input/Output-Gigawords（RFC 2869。4 GiB で折り返した回数。MVP の設計概要 §10.2）
+	if v := packet.Get(radius.Type(AttrTypeAcctInputGiga)); len(v) >= 4 {
+		attrs.InputGigawords = binary.BigEndian.Uint32(v)
+	}
+	if v := packet.Get(radius.Type(AttrTypeAcctOutputGiga)); len(v) >= 4 {
+		attrs.OutputGigawords = binary.BigEndian.Uint32(v)
+	}
+
+	// Event-Timestamp（RFC 2869。利用の集計の日の割り当てに使う）
+	if v := packet.Get(radius.Type(AttrTypeEventTimestamp)); len(v) >= 4 {
+		if sec := binary.BigEndian.Uint32(v); sec > 0 {
+			attrs.EventTimestamp = time.Unix(int64(sec), 0)
+		}
+	}
+
+	// Calling-Station-Id（オプション）
+	if v := packet.Get(radius.Type(AttrTypeCallingStation)); len(v) > 0 {
+		attrs.CallingStationID = string(v)
 	}
 
 	// Proxy-State（複数可）

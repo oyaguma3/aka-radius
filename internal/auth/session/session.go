@@ -1,79 +1,9 @@
 package session
 
-import (
-	"context"
-	"fmt"
+import "github.com/google/uuid"
 
-	"github.com/google/uuid"
-	"github.com/oyaguma3/aka-radius/internal/auth/config"
-	"github.com/oyaguma3/aka-radius/internal/auth/store"
-)
-
-// Session はアクティブセッションを表す（D-09 セクション9.3.1準拠）。
-type Session struct {
-	IMSI          string `redis:"imsi"`
-	TenantID      int64  `redis:"tenant_id"` // 刻印のテナントの ID（MVP の設計概要 §6.1）
-	NasIP         string `redis:"nas_ip"`
-	NasIdentifier string `redis:"nas_identifier"` // ポリシー評価に使ったNAS-Identifier（プロキシ経由でもNASを識別できる）
-	StartTime     int64  `redis:"start_time"`
-	ClientIP      string `redis:"client_ip"`
-	AcctID        string `redis:"acct_id"`
-	InputOctets   int64  `redis:"input_octets"`
-	OutputOctets  int64  `redis:"output_octets"`
-}
-
-// sessionStore はSessionStoreの実装。
-type sessionStore struct {
-	vc *store.ValkeyClient
-}
-
-// NewSessionStore はSessionStoreの新しいインスタンスを生成する。
-func NewSessionStore(vc *store.ValkeyClient) SessionStore {
-	return &sessionStore{vc: vc}
-}
-
-// Create はセッションをValkeyに保存する。
-func (s *sessionStore) Create(ctx context.Context, sessionID string, sess *Session) error {
-	key := store.KeyPrefixSession + sessionID
-	m := store.StructToMap(sess)
-
-	pipe := s.vc.Client().Pipeline()
-	pipe.HSet(ctx, key, m)
-	pipe.Expire(ctx, key, config.SessionTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("%w: %v", store.ErrValkeyUnavailable, err)
-	}
-	return nil
-}
-
-// Get はセッションをValkeyから取得する。
-func (s *sessionStore) Get(ctx context.Context, sessionID string) (*Session, error) {
-	key := store.KeyPrefixSession + sessionID
-	m, err := s.vc.Client().HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", store.ErrValkeyUnavailable, err)
-	}
-	if len(m) == 0 {
-		return nil, ErrSessionNotFound
-	}
-
-	var sess Session
-	if err := store.MapToStruct(m, &sess); err != nil {
-		return nil, fmt.Errorf("session deserialization error: %w", err)
-	}
-	return &sess, nil
-}
-
-// AddUserIndex はIMSIとセッションIDの紐付けをSet型で追加する。
-func (s *sessionStore) AddUserIndex(ctx context.Context, imsi string, sessionID string) error {
-	key := store.KeyPrefixUserIndex + imsi
-	if err := s.vc.Client().SAdd(ctx, key, sessionID).Err(); err != nil {
-		return fmt.Errorf("%w: %v", store.ErrValkeyUnavailable, err)
-	}
-	return nil
-}
-
-// GenerateSessionID はUUID形式のセッションIDを生成する。
+// GenerateSessionID はUUID形式のセッションIDを生成する（Access-Accept の Class に入れる）。
+// セッションそのものの読み書きは internal/sessions（auth・acct・admin で共通。MVP の設計概要 §10.1）。
 func GenerateSessionID() string {
 	return uuid.New().String()
 }

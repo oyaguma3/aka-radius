@@ -79,6 +79,9 @@ services:
       RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
       RADIUS_REQUEST_TIMEOUT: ${RADIUS_REQUEST_TIMEOUT:-4s}
       RADIUS_MAX_INFLIGHT: ${RADIUS_MAX_INFLIGHT:-256}
+      # 利用の集計のテナントに使う刻印の Vendor-Specific（auth と同じ値にする。MVP の設計概要 §10.2）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
     depends_on:
       valkey:
         condition: service_healthy

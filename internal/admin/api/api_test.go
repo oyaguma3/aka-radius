@@ -14,7 +14,9 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/oyaguma3/aka-radius/internal/admin/audit"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
+	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
+	"github.com/oyaguma3/aka-radius/internal/usage"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,6 +31,7 @@ func (f fakeSources) Infos() ([]source.Info, time.Time) {
 type testAPI struct {
 	srv  *httptest.Server
 	mr   *miniredis.Miniredis
+	rdb  *redis.Client
 	logs *bytes.Buffer
 }
 
@@ -40,7 +43,9 @@ func newTestAPI(t *testing.T) *testAPI {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&logs, nil))
 	h := &Handler{
-		Subs: subscriber.NewStore(rdb),
+		Subs:     subscriber.NewStore(rdb),
+		Sessions: sessions.NewStore(rdb),
+		Usage:    usage.NewStore(rdb),
 		Sources: fakeSources{infos: []source.Info{
 			{ID: "vecgen", Name: "aka-vecgen", BaseURL: "https://aka-vecgen:8443/nudm-ueau/v1", Timeout: 3 * time.Second, NotAfter: time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC)},
 			{ID: "other", Name: "other", BaseURL: "https://other/nudm-ueau/v1", Timeout: time.Second},
@@ -57,7 +62,7 @@ func newTestAPI(t *testing.T) *testAPI {
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
-	return &testAPI{srv: srv, mr: mr, logs: &logs}
+	return &testAPI{srv: srv, mr: mr, rdb: rdb, logs: &logs}
 }
 
 // do は要求を送り、状態の符号と本文（JSON をデコードしたもの）を返す。
@@ -295,5 +300,77 @@ func TestPreviousIDBoundary(t *testing.T) {
 	out := a.wantStatus(t, "GET", "/admin/v2/audit-logs?before=0-0", "", http.StatusOK, "")
 	if len(out["items"].([]any)) != 0 {
 		t.Errorf("items = %v", out)
+	}
+}
+
+func TestSessions(t *testing.T) {
+	a := newTestAPI(t)
+	st := sessions.NewStore(a.rdb)
+	now := time.Now()
+	for i, x := range []struct {
+		id, imsi string
+		tenant   int64
+	}{{"s1", "440100000000001", 42}, {"s2", "440100000000002", 42}, {"s3", "440100000000001", 7}} {
+		if err := st.Create(t.Context(), sessions.Session{ID: x.id, IMSI: x.imsi, TenantID: x.tenant, NasIP: "192.0.2.1", NasIdentifier: "ap"}, now.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := a.wantStatus(t, "GET", "/admin/v2/sessions?tenantId=42&limit=1", "", http.StatusOK, "")
+	items := out["items"].([]any)
+	if len(items) != 1 || out["nextCursor"] != "1" || items[0].(map[string]any)["id"] != "s1" || items[0].(map[string]any)["tenantId"] != float64(42) {
+		t.Fatalf("page 1 = %v", out)
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/sessions?tenantId=42&limit=1&cursor=1", "", http.StatusOK, "")
+	if items := out["items"].([]any); len(items) != 1 || items[0].(map[string]any)["id"] != "s2" || out["nextCursor"] != nil {
+		t.Fatalf("page 2 = %v", out)
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/sessions?imsi=440100000000001,440100000000009", "", http.StatusOK, "")
+	if items := out["items"].([]any); len(items) != 2 {
+		t.Fatalf("imsi = %v", out)
+	}
+	for _, q := range []string{"", "tenantId=1&imsi=440100000000001", "tenantId=x", "imsi=123", "tenantId=1&cursor=x", "tenantId=1&limit=1001",
+		"imsi=" + strings.TrimSuffix(strings.Repeat("440100000000001,", 101), ",")} {
+		a.wantStatus(t, "GET", "/admin/v2/sessions?"+q, "", http.StatusBadRequest, causeInvalidQueryParam)
+	}
+
+	// /status のセッションの数は、acct の掃除で数えた後だけ返す
+	if out = a.wantStatus(t, "GET", "/admin/v2/status", "", http.StatusOK, ""); out["sessionCount"] != nil {
+		t.Errorf("sessionCount before sweep = %v", out["sessionCount"])
+	}
+	if _, err := st.Sweep(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	if out = a.wantStatus(t, "GET", "/admin/v2/status", "", http.StatusOK, ""); out["sessionCount"] != float64(3) || out["sessionsCountedAt"] == nil {
+		t.Errorf("sessionCount = %v", out["sessionCount"])
+	}
+}
+
+func TestUsage(t *testing.T) {
+	a := newTestAPI(t)
+	us := usage.NewStore(a.rdb)
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, usage.JST)
+	for _, imsi := range []string{"440100000000002", "440100000000001"} {
+		if err := us.AddAuthOK(t.Context(), now, 42, imsi); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.mr.HSet(usage.Key("20261028", 42, "440100000000001"), usage.FieldSeconds, "60", usage.FieldInOctets, "100")
+	out := a.wantStatus(t, "GET", "/admin/v2/usage?date=2026-10-28&limit=1", "", http.StatusOK, "")
+	items := out["items"].([]any)
+	if len(items) != 1 || out["nextCursor"] != "42:440100000000001" {
+		t.Fatalf("page 1 = %v", out)
+	}
+	if r := items[0].(map[string]any); r["date"] != "2026-10-28" || r["tenantId"] != float64(42) || r["authOk"] != float64(1) || r["seconds"] != float64(60) || r["inOctets"] != float64(100) {
+		t.Errorf("record = %v", r)
+	}
+	out = a.wantStatus(t, "GET", "/admin/v2/usage?date=2026-10-28&cursor=42:440100000000001", "", http.StatusOK, "")
+	if items := out["items"].([]any); len(items) != 1 || items[0].(map[string]any)["imsi"] != "440100000000002" {
+		t.Fatalf("page 2 = %v", out)
+	}
+	if out = a.wantStatus(t, "GET", "/admin/v2/usage?date=2026-10-27", "", http.StatusOK, ""); len(out["items"].([]any)) != 0 {
+		t.Errorf("other day = %v", out)
+	}
+	for _, q := range []string{"", "date=20261028", "date=2026-10-28&cursor=x", "date=2026-10-28&limit=0"} {
+		a.wantStatus(t, "GET", "/admin/v2/usage?"+q, "", http.StatusBadRequest, causeInvalidQueryParam)
 	}
 }

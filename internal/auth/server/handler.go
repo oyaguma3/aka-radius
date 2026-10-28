@@ -126,7 +126,7 @@ func (h *Handler) handleAccessRequest(w radius.ResponseWriter, r *radius.Request
 		UserName:      userName,
 		State:         state,
 		EAPMessage:    eapMessage,
-		Stamps:        radiuspkg.GetVendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType),
+		Stamps:        radiussrv.VendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType),
 	}
 
 	// EAPエンジン処理（エンジンは内部エラーをログに記録してRejectに変換するため、常に結果を返す）。

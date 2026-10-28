@@ -23,21 +23,23 @@ type sourceStatusJSON struct {
 
 type statusJSON struct {
 	// Version は管理API の版、Build はビルドの版
-	Version         string             `json:"version"`
-	Build           string             `json:"build"`
-	NodeName        string             `json:"nodeName"`
-	StartedAt       time.Time          `json:"startedAt"`
-	SubscriberCount int64              `json:"subscriberCount"`
-	Sources         []sourceStatusJSON `json:"sources"`
-	SourcesLoadedAt time.Time          `json:"sourcesLoadedAt"`
+	Version         string    `json:"version"`
+	Build           string    `json:"build"`
+	NodeName        string    `json:"nodeName"`
+	StartedAt       time.Time `json:"startedAt"`
+	SubscriberCount int64     `json:"subscriberCount"`
+	// SessionCount・SessionsCountedAt は acct が 1 時間ごとの掃除で数えたセッションの数と、数えた時刻（まだ数えていなければ返さない）
+	SessionCount      *int64             `json:"sessionCount,omitempty"`
+	SessionsCountedAt *time.Time         `json:"sessionsCountedAt,omitempty"`
+	Sources           []sourceStatusJSON `json:"sources"`
+	SourcesLoadedAt   time.Time          `json:"sourcesLoadedAt"`
 	// StampVendorID・StampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（auth と同じ環境変数）
 	StampVendorID   uint32   `json:"stampVendorId"`
 	StampVendorType int      `json:"stampVendorType"`
 	AdminClients    []string `json:"adminClients"`
 }
 
-// getStatus はノードの状態を返す。RADIUS クライアントの数・セッションの数・取得先の遮断器の状態は、
-// それぞれの口と一緒に段階 2-4・2-5 で足す。
+// getStatus はノードの状態を返す。RADIUS クライアントの数と取得先の遮断器の状態は段階 2-5 で足す。
 func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	count, err := h.Subs.Count(ctx)
@@ -55,6 +57,11 @@ func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	sessCount, countedAt, counted, err := h.Sessions.Stats(ctx)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
 	out := statusJSON{
 		Version:         Version,
 		Build:           h.Build,
@@ -66,6 +73,10 @@ func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
 		StampVendorID:   h.StampVendorID,
 		StampVendorType: int(h.StampVendorType),
 		AdminClients:    h.AdminClients,
+	}
+	if counted {
+		at := countedAt.UTC()
+		out.SessionCount, out.SessionsCountedAt = &sessCount, &at
 	}
 	for i, in := range infos {
 		s := sourceStatusJSON{ID: in.ID, Name: in.Name, BaseURL: in.BaseURL, TimeoutMs: in.Timeout.Milliseconds(), SubscriberCount: counts[in.ID]}

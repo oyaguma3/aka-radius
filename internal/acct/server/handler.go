@@ -1,23 +1,32 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/google/uuid"
-	"github.com/oyaguma3/aka-radius/internal/acct/acct"
 	radiuspkg "github.com/oyaguma3/aka-radius/internal/acct/radius"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
 	"layeh.com/radius"
 )
 
-// Handler はRADIUSリクエストを処理するハンドラ。
-type Handler struct {
-	processor acct.AccountingProcessor
+// AccountingProcessor は Accounting-Request を処理する（processor.Processor）。
+// 誤りを返したら応答しない（NAS に送り直させる）。
+type AccountingProcessor interface {
+	Process(ctx context.Context, attrs *radiuspkg.AccountingAttributes, srcIP, traceID string) error
 }
 
-// NewHandler は新しいHandlerを生成する
-func NewHandler(processor acct.AccountingProcessor) *Handler {
-	return &Handler{processor: processor}
+// Handler はRADIUSリクエストを処理するハンドラ。
+type Handler struct {
+	processor AccountingProcessor
+	// stampVendorID・stampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（MVP の設計概要 §8.3）
+	stampVendorID   uint32
+	stampVendorType byte
+}
+
+// NewHandler は新しいHandlerを生成する。stampVendorID・stampVendorType はテナントの刻印の Vendor-Specific。
+func NewHandler(processor AccountingProcessor, stampVendorID uint32, stampVendorType byte) *Handler {
+	return &Handler{processor: processor, stampVendorID: stampVendorID, stampVendorType: stampVendorType}
 }
 
 // ServeRADIUS はRADIUSリクエストを処理する
@@ -68,20 +77,15 @@ func (h *Handler) handleAccountingRequest(w radius.ResponseWriter, r *radius.Req
 		return // パケット破棄
 	}
 
-	// 3. Status-Type別処理（各処理は内部のエラーをログに記録して継続する）
+	// 3. Status-Type別処理。記録できなければ（Valkey に書けない）応答せず、NAS に送り直させる。
 	// context は受け口（radiussrv.Guard）が付けた要求の期限つき
-	ctx := r.Context()
 	switch attrs.AcctStatusType {
-	case radiuspkg.AcctStatusTypeStart:
-		h.processor.ProcessStart(ctx, attrs, srcIP, traceID)
-	case radiuspkg.AcctStatusTypeStop:
-		h.processor.ProcessStop(ctx, attrs, srcIP, traceID)
-	case radiuspkg.AcctStatusTypeInterim:
-		h.processor.ProcessInterim(ctx, attrs, srcIP, traceID)
-	case radiuspkg.AcctStatusTypeOn:
-		h.processor.ProcessOn(ctx, attrs, srcIP, traceID)
-	case radiuspkg.AcctStatusTypeOff:
-		h.processor.ProcessOff(ctx, attrs, srcIP, traceID)
+	case radiuspkg.AcctStatusTypeStart, radiuspkg.AcctStatusTypeStop, radiuspkg.AcctStatusTypeInterim,
+		radiuspkg.AcctStatusTypeOn, radiuspkg.AcctStatusTypeOff:
+		attrs.Stamps = radiussrv.VendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType)
+		if err := h.processor.Process(r.Context(), attrs, srcIP, traceID); err != nil {
+			return
+		}
 	default:
 		slog.Warn("未対応のAcct-Status-Type",
 			"event_id", "RADIUS_UNKNOWN_CODE",

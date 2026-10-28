@@ -16,7 +16,11 @@ info:
       `active` は物理削除できず、`terminated` は変更できない（aka-vecgen と同じ規則）。
     - 加入者の一括取得 `POST /subscribers/batch-get` を足した。
     - 鍵（`/subscribers/{imsi}/keys`）、認可ポリシー（`/policies`）、RADIUSクライアントの書き込みと `/clients/{id}/secret` をなくした。
-    - `/sessions`・`/usage` は段階 2-4、RADIUSクライアントと取得先の読み出し（`/clients`・`/sources`）は段階 2-5 で足す。
+    - RADIUSクライアントと取得先の読み出し（`/clients`・`/sources`）は段階 2-5 で足す。
+
+    2.0.0-draft（MVP セットの段階 2-4）:
+    - セッションの一覧 `GET /sessions`（テナントか IMSI で絞る）と、利用の集計 `GET /usage`（日本時間の 1 日ごと）を足した。
+    - `/status` に、セッションの数と数えた時刻（`sessionCount`・`sessionsCountedAt`）を足した。
 
     認証:
     - mTLS 必須。サーバーに設定した管理クライアントの証明書（SHA-256 のフィンガープリント）だけを受け付ける
@@ -52,6 +56,8 @@ tags:
     description: ノードの状態
   - name: subscribers
     description: 加入者
+  - name: sessions
+    description: セッションと利用の集計
   - name: logs
     description: 監査ログ
 
@@ -343,6 +349,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchGetResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /sessions:
+    parameters:
+      - $ref: '#/components/parameters/TraceId'
+    get:
+      tags: [sessions]
+      summary: セッションの一覧を取得する
+      operationId: listSessions
+      description: |
+        `tenantId` か `imsi` のどちらか 1 つで絞る（両方・どちらもなしは 400）。テナントは、Access-Accept のときの刻印のテナント。
+        期限の早い順（最後に Accounting が届いたのが古い順）に返す。期限を過ぎたものは返さない。
+      parameters:
+        - name: tenantId
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: imsi
+          in: query
+          description: IMSI のカンマ区切り（100 件まで）。
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: 前のページの `nextCursor`。
+          schema:
+            type: string
+            pattern: '^[0-9]{1,9}$'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: セッションの一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /usage:
+    parameters:
+      - $ref: '#/components/parameters/TraceId'
+    get:
+      tags: [sessions]
+      summary: 利用の集計を取得する
+      operationId: listUsage
+      description: |
+        日本時間の 1 日の、テナント・IMSI ごとの利用の集計を、テナントと IMSI の辞書順に返す（課金レコード §5.2）。
+        集計は 7 日前の日まで取り出せる。その日が終わる前は途中の値。aka-ossbss が毎日と締めのときに取り込む。
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: 日本時間の日付。
+          schema:
+            type: string
+            format: date
+            example: '2026-10-28'
+        - name: cursor
+          in: query
+          description: 前のページの `nextCursor`。
+          schema:
+            type: string
+            pattern: '^[0-9]{1,19}:[0-9]{15}$'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+      responses:
+        '200':
+          description: 利用の集計
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageList'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -653,6 +750,14 @@ components:
         subscriberCount:
           type: integer
           format: int64
+        sessionCount:
+          type: integer
+          format: int64
+          description: acct が 1 時間ごとの掃除で数えたセッションの数（まだ数えていなければ返さない）。
+        sessionsCountedAt:
+          type: string
+          format: date-time
+          description: セッションの数を数えた時刻。
         sources:
           type: array
           description: 取得先の登録簿の取得先（ファイルの順）。遮断器の状態は段階 2-5 で足す。
@@ -675,6 +780,111 @@ components:
           description: 管理クライアントの識別名。
           items:
             type: string
+
+    Session:
+      type: object
+      required: [id, imsi, tenantId, nasIp, nasIdentifier, seconds, inOctets, outOctets, expiresAt]
+      properties:
+        id:
+          type: string
+          description: セッションの ID（Access-Accept の Class）。
+        imsi:
+          $ref: '#/components/schemas/Imsi'
+        tenantId:
+          type: integer
+          format: int64
+          description: Access-Accept のときの刻印のテナント。
+        nasIp:
+          type: string
+          description: 送信元（エッジのトンネルの IP）。
+        nasIdentifier:
+          type: string
+        callingStationId:
+          type: string
+        framedIp:
+          type: string
+        acctSessionId:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+          description: Accounting-Start を受けた時刻（なければ Access-Accept の時刻）。
+        lastUpdate:
+          type: string
+          format: date-time
+        seconds:
+          type: integer
+          format: int64
+          description: Accounting の最後の累計（Acct-Session-Time）。
+        inOctets:
+          type: integer
+          format: int64
+          description: Accounting の最後の累計（Acct-Input-Octets と Gigawords）。
+        outOctets:
+          type: integer
+          format: int64
+        expiresAt:
+          type: string
+          format: date-time
+          description: セッションの期限（Accounting-Start・Interim で 24 時間に延びる）。
+
+    SessionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+        nextCursor:
+          type: string
+          description: 次のページがある場合だけ返す。
+
+    UsageRecord:
+      type: object
+      required: [date, tenantId, imsi, authOk, sessions, seconds, inOctets, outOctets]
+      properties:
+        date:
+          type: string
+          format: date
+        tenantId:
+          type: integer
+          format: int64
+          description: 刻印のテナント（刻印がなく分からなければ 0）。
+        imsi:
+          $ref: '#/components/schemas/Imsi'
+        authOk:
+          type: integer
+          format: int64
+          description: 認証の成功（Access-Accept）の回数。
+        sessions:
+          type: integer
+          format: int64
+          description: Accounting-Start の数（重複を除く）。
+        seconds:
+          type: integer
+          format: int64
+          description: 利用の時間（Acct-Session-Time の増分の合計）。
+        inOctets:
+          type: integer
+          format: int64
+          description: 受信の量（Gigawords を含む増分の合計）。
+        outOctets:
+          type: integer
+          format: int64
+          description: 送信の量。
+
+    UsageList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageRecord'
+        nextCursor:
+          type: string
+          description: 次のページがある場合だけ返す。
 
     AuditAction:
       type: string
