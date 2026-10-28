@@ -233,7 +233,7 @@ func (v *Verifier) reject(reason, fp, srcIP string) {
 		return
 	}
 	v.Log.Warn("admin client certificate rejected",
-		"event_id", "PROV_CLIENT_REJECTED",
+		"event_id", "ADMIN_CLIENT_REJECTED",
 		"reason", reason,
 		"fingerprint", fp,
 		"src_ip", srcIP,

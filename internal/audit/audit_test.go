@@ -81,6 +81,24 @@ func TestRecordFileError(t *testing.T) {
 	}
 }
 
+func TestRecordWithoutValkey(t *testing.T) {
+	// Valkey につながない Recorder は、日ごとのファイルにだけ書く
+	var logs bytes.Buffer
+	dir := t.TempDir()
+	r := NewRecorder(nil, 100, NewFiles(dir, 14), slog.New(slog.NewJSONHandler(&logs, nil)))
+	r.Record(t.Context(), Entry{Operator: "cli", MgmtClient: "cli", Action: "admin-server-certificate.create", Target: "aka-radius-admin"})
+	paths, _ := filepath.Glob(filepath.Join(dir, "audit-*.jsonl"))
+	if len(paths) != 1 {
+		t.Fatalf("files = %v", paths)
+	}
+	if lines := readLines(t, paths[0]); len(lines) != 1 || lines[0]["action"] != "admin-server-certificate.create" || lines[0]["streamId"] != nil {
+		t.Errorf("lines = %v", lines)
+	}
+	if strings.Contains(logs.String(), "AUDIT_WRITE_ERR") {
+		t.Errorf("log = %s", logs.String())
+	}
+}
+
 func TestCheckWritableDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "audit")
 	if err := CheckWritableDir(dir); err != nil {

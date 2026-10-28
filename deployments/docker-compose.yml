@@ -35,7 +35,8 @@ services:
     <<: *aka-radius
     command: ["auth"]
     ports:
-      - "1812:1812/udp"
+      # 既定はループバックだけ。本番はサービス用の WireGuard のアドレス（エッジのトンネルの IP から受ける）にする（.env の RADIUS_UDP_BIND）
+      - "${RADIUS_UDP_BIND:-127.0.0.1}:1812:1812/udp"
     environment:
       <<: *radius-common-env
       # 取得先の登録簿（MVP の設計概要 §7.1）。SIGHUP で読み直す: docker compose kill -s HUP auth
@@ -74,7 +75,8 @@ services:
     <<: *aka-radius
     command: ["acct"]
     ports:
-      - "1813:1813/udp"
+      # 既定はループバックだけ。本番はサービス用の WireGuard のアドレス（エッジのトンネルの IP から受ける）にする（.env の RADIUS_UDP_BIND）
+      - "${RADIUS_UDP_BIND:-127.0.0.1}:1813:1813/udp"
     environment:
       <<: *radius-common-env
       RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
@@ -182,7 +184,7 @@ services:
       valkey-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory 512mb
+      --maxmemory 1gb
       --maxmemory-policy noeviction
       --requirepass ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
     environment:

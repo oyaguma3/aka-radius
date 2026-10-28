@@ -261,6 +261,16 @@ func TestAdminCertAndFingerprint(t *testing.T) {
 	if lines := auditLines(t, auditDir); len(lines) != 1 || lines[0]["action"] != "admin-server-certificate.create" || lines[0]["detail"].(map[string]any)["fingerprint"] != fp {
 		t.Errorf("audit = %v", lines)
 	}
+
+	// Valkey に届かなくても（Valkey を起動する前）、日ごとのファイルには残す
+	t.Setenv("RADIUS_VALKEY_PORT", "1")
+	setIO(t, "")
+	if err := adminCertCommand(t.Context(), []string{"create", "-hosts", "x", "-out", dir, "-force"}); err != nil {
+		t.Fatal(err)
+	}
+	if lines := auditLines(t, auditDir); len(lines) != 2 || lines[1]["streamId"] != nil {
+		t.Errorf("audit without Valkey = %v", lines)
+	}
 }
 
 func TestHealthcheckCommand(t *testing.T) {

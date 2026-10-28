@@ -61,6 +61,7 @@ type Recorder struct {
 }
 
 // NewRecorder は Recorder を作る。files が nil なら日ごとのファイルには書かない。
+// rdb が nil なら Stream には書かない（読み出しの List は使えない。コマンドが Valkey に届かないとき）。
 func NewRecorder(rdb *redis.Client, maxLen int64, files *Files, log *slog.Logger) *Recorder {
 	return &Recorder{rdb: rdb, maxLen: maxLen, files: files, log: log, now: time.Now}
 }
@@ -78,6 +79,11 @@ func (r *Recorder) Record(ctx context.Context, e Entry) {
 		"target", e.Target,
 		"detail", e.Detail,
 	)
+	if r.rdb == nil {
+		// Valkey に届かないコマンド（Valkey を起動する前の admin-cert create）は、日ごとのファイルにだけ書く
+		r.appendFile(e, "")
+		return
+	}
 	// 要求が途中で切れても書くことは試みる。
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
 	defer cancel()
@@ -97,10 +103,14 @@ func (r *Recorder) Record(ctx context.Context, e Entry) {
 	if err != nil {
 		r.writeError("stream", e, err)
 	}
+	r.appendFile(e, id)
+}
+
+func (r *Recorder) appendFile(e Entry, streamID string) {
 	if r.files == nil {
 		return
 	}
-	if err := r.files.Append(e, id); err != nil {
+	if err := r.files.Append(e, streamID); err != nil {
 		r.writeError("file", e, err)
 	}
 }

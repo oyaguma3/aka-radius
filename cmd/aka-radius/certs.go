@@ -92,13 +92,17 @@ func adminCertCommand(ctx context.Context, args []string) error {
 	describeCert(cert)
 	_, _ = fmt.Fprintf(stdout, "wrote %s and %s\n%s\n", certPath, keyPath, adminReloadNotice)
 
-	// 監査ログに残す（Valkey に届かなければ、証明書は作ったまま警告だけを出す）
+	// 監査ログに残す。Valkey に届かなければ（Valkey を起動する前に作るとき）、日ごとのファイルにだけ書く
 	rdb, a, err := openValkey(*operator)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: the audit log was not written: %v\n", err)
-		return nil
+		_, _ = fmt.Fprintf(os.Stderr, "note: Valkey is not reachable, so the audit log goes to the daily file only: %v\n", err)
+		if a, err = fileOnlyAudit(*operator); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: the audit log was not written: %v\n", err)
+			return nil
+		}
+	} else {
+		defer func() { _ = rdb.Close() }()
 	}
-	defer func() { _ = rdb.Close() }()
 	a.record(ctx, "admin-server-certificate.create", adminCertCN, map[string]any{
 		"fingerprint": auth.Fingerprint(cert), "dnsNames": cert.DNSNames, "ipAddresses": ipStrings(cert.IPAddresses),
 		"notAfter": cert.NotAfter.UTC(),
