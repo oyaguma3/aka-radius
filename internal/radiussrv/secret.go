@@ -7,11 +7,12 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/oyaguma3/aka-radius/internal/clients"
 	"github.com/redis/go-redis/v9"
 )
 
-// keyPrefixClient はRADIUSクライアント設定のキーの接頭辞（D-02準拠）
-const keyPrefixClient = "client:"
+// keyPrefixClient はRADIUSクライアント設定のキーの接頭辞（書き込みはコマンド aka-radius client。internal/clients）
+const keyPrefixClient = clients.KeyPrefix
 
 // ClientStore はRADIUSクライアントの共有シークレットの取得を定義する
 type ClientStore interface {

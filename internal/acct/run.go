@@ -13,6 +13,7 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/acct/processor"
 	"github.com/oyaguma3/aka-radius/internal/acct/server"
 	"github.com/oyaguma3/aka-radius/internal/acct/store"
+	"github.com/oyaguma3/aka-radius/internal/health"
 	"github.com/oyaguma3/aka-radius/internal/logging"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
 	"github.com/oyaguma3/aka-radius/internal/sessions"
@@ -60,6 +61,16 @@ func Main(build string) {
 
 	slog.Info("Valkey接続完了", "addr", cfg.ValkeyAddr())
 
+	// healthcheck の口（ループバック。Valkey に届くかを返す。MVP の設計概要 §5）
+	healthSrv, err := health.Start(cfg.HealthAddr, func(ctx context.Context) error {
+		return valkeyClient.Client().Ping(ctx).Err()
+	}, slog.Default())
+	if err != nil {
+		slog.Error("healthcheck の口の待ち受け失敗", "event_id", "SYS_LISTEN_ERR", "addr", cfg.HealthAddr, "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = healthSrv.Close() }()
+
 	// 4. RADIUS サーバー
 	rdb := valkeyClient.Client()
 	srv := newServer(cfg, rdb)
@@ -74,7 +85,7 @@ func Main(build string) {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	if err := radiussrv.Run(srv, cfg.ListenAddr, sigCh, config.ShutdownTimeout); err != nil {
 		// 待ち受けを開始できない（ポートが使用中など）か、異常終了した。プロセスを終えて、compose の restart で
-		// 起動し直させる（終了しないと、待ち受けていないのに pgrep の healthcheck が通ってしまう）
+		// 起動し直させる
 		slog.Error("サーバーエラー", "event_id", "SYS_LISTEN_ERR", "addr", cfg.ListenAddr, "error", err)
 		os.Exit(1)
 	}

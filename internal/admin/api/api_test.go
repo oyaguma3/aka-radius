@@ -12,8 +12,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/oyaguma3/aka-radius/internal/admin/audit"
+	"github.com/oyaguma3/aka-radius/internal/audit"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
+	"github.com/oyaguma3/aka-radius/internal/clients"
 	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
 	"github.com/oyaguma3/aka-radius/internal/usage"
@@ -47,13 +48,19 @@ func newTestAPI(t *testing.T) *testAPI {
 		Sessions: sessions.NewStore(rdb),
 		Usage:    usage.NewStore(rdb),
 		Sources: fakeSources{infos: []source.Info{
-			{ID: "vecgen", Name: "aka-vecgen", BaseURL: "https://aka-vecgen:8443/nudm-ueau/v1", Timeout: 3 * time.Second, NotAfter: time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "vecgen", Name: "aka-vecgen", BaseURL: "https://aka-vecgen:8443/nudm-ueau/v1", Timeout: 3 * time.Second, NotAfter: time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC),
+				ClientCertSubject: "CN=aka-radius", ClientCertFingerprint: strings.Repeat("ab", 32),
+				ServerCAs: []source.CertInfo{{Subject: "CN=aka-vecgen", NotAfter: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)}}},
 			{ID: "other", Name: "other", BaseURL: "https://other/nudm-ueau/v1", Timeout: time.Second},
 		}},
-		Audit:           audit.NewRecorder(rdb, 1000, log),
-		Log:             log,
-		MgmtClient:      func(*http.Request) string { return "provisioner" },
-		AdminClients:    []string{"provisioner"},
+		Clients:      clients.NewStore(rdb),
+		SourceStatus: source.NewStatusStore(rdb),
+		Audit:        audit.NewRecorder(rdb, 1000, nil, log),
+		Log:          log,
+		MgmtClient:   func(*http.Request) string { return "provisioner" },
+		AdminClients: func() ([]string, time.Time) {
+			return []string{"provisioner"}, time.Date(2026, 10, 28, 2, 0, 0, 0, time.UTC)
+		},
 		Build:           "test",
 		NodeName:        "node-1",
 		StartedAt:       time.Date(2026, 10, 28, 1, 0, 0, 0, time.UTC),
@@ -257,6 +264,10 @@ func TestStatusAndCommon(t *testing.T) {
 	if s := srcs[1].(map[string]any); s["subscriberCount"] != float64(0) || s["clientCertificateNotAfter"] != nil {
 		t.Errorf("sources[1] = %v", s)
 	}
+	// 遮断器の報告がまだなければ circuitBreaker は返さない。RADIUS クライアントの数と管理クライアントを読んだ時刻
+	if s := srcs[0].(map[string]any); s["circuitBreaker"] != nil || out["clientCount"] != float64(0) || out["adminClientsLoadedAt"] != "2026-10-28T02:00:00Z" {
+		t.Errorf("status = %v", out)
+	}
 
 	// X-Trace-ID は受け取った値をそのまま返し、なければ採番する
 	_, _, hdr := a.do(t, "GET", "/admin/v2/status", "", "X-Trace-ID", "trace-123")
@@ -293,6 +304,84 @@ func TestStatusAndCommon(t *testing.T) {
 		t.Errorf("detail = %v", d)
 	}
 	a.wantStatus(t, "GET", "/admin/v2/audit-logs?before=x", "", http.StatusBadRequest, causeInvalidQueryParam)
+}
+
+func TestClientsAndSources(t *testing.T) {
+	a := newTestAPI(t)
+	cs := clients.NewStore(a.rdb)
+	secret := strings.Repeat("s", 16)
+	for _, c := range []clients.Client{
+		{IP: "10.0.0.10", Name: "edge-02", Secret: secret, TrustStamp: true},
+		{IP: "10.0.0.9", Name: "edge-01", Secret: secret},
+	} {
+		if err := cs.Add(t.Context(), c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, _ := a.do(t, "GET", "/admin/v2/clients", "")
+	items, _ := out["items"].([]any)
+	if code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("clients = %d %v", code, out)
+	}
+	first := items[0].(map[string]any)
+	if first["ip"] != "10.0.0.9" || first["name"] != "edge-01" || first["trustStamp"] != false || first["createdAt"] == nil {
+		t.Errorf("clients[0] = %v", first)
+	}
+	if items[1].(map[string]any)["trustStamp"] != true {
+		t.Errorf("clients[1] = %v", items[1])
+	}
+	// 共有シークレットは返さない
+	_, raw := a.raw(t, "/admin/v2/clients")
+	if strings.Contains(raw, secret) || strings.Contains(raw, "secret") {
+		t.Errorf("clients response contains the secret: %s", raw)
+	}
+	if out := a.wantStatus(t, "GET", "/admin/v2/status", "", http.StatusOK, ""); out["clientCount"] != float64(2) {
+		t.Errorf("clientCount = %v", out["clientCount"])
+	}
+
+	// auth の遮断器の報告
+	reported := time.Date(2026, 10, 28, 3, 0, 0, 0, time.UTC)
+	if err := source.NewStatusStore(a.rdb).Write(t.Context(), source.Status{ReportedAt: reported, Sources: map[string]source.BreakerStatus{
+		"vecgen": {State: "open", Since: reported.Add(-time.Minute)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	a.wantStatus(t, "POST", "/admin/v2/subscribers", createBody, http.StatusCreated, "")
+	out = a.wantStatus(t, "GET", "/admin/v2/sources", "", http.StatusOK, "")
+	srcs := out["items"].([]any)
+	s0 := srcs[0].(map[string]any)
+	cb, _ := s0["circuitBreaker"].(map[string]any)
+	if s0["id"] != "vecgen" || s0["subscriberCount"] != float64(1) || cb["state"] != "open" || cb["reportedAt"] != "2026-10-28T03:00:00Z" || cb["since"] != "2026-10-28T02:59:00Z" {
+		t.Errorf("sources[0] = %v", s0)
+	}
+	cert, _ := s0["clientCertificate"].(map[string]any)
+	cas, _ := s0["serverCas"].([]any)
+	if cert["fingerprint"] != strings.Repeat("ab", 32) || cert["subject"] != "CN=aka-radius" || cert["notAfter"] != "2029-01-01T00:00:00Z" ||
+		len(cas) != 1 || cas[0].(map[string]any)["notAfter"] != "2030-01-01T00:00:00Z" {
+		t.Errorf("certificates = %v %v", cert, cas)
+	}
+	if s1 := srcs[1].(map[string]any); s1["clientCertificate"] != nil || s1["circuitBreaker"] != nil || len(s1["serverCas"].([]any)) != 0 {
+		t.Errorf("sources[1] = %v", s1)
+	}
+	if out["loadedAt"] != "2026-10-28T00:00:00Z" {
+		t.Errorf("loadedAt = %v", out["loadedAt"])
+	}
+	st := a.wantStatus(t, "GET", "/admin/v2/status", "", http.StatusOK, "")
+	if cb := st["sources"].([]any)[0].(map[string]any)["circuitBreaker"].(map[string]any); cb["state"] != "open" {
+		t.Errorf("status circuitBreaker = %v", cb)
+	}
+}
+
+// raw は GET の本文をそのまま返す。
+func (a *testAPI) raw(t *testing.T, path string) (int, string) {
+	t.Helper()
+	resp, err := http.Get(a.srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
 }
 
 func TestPreviousIDBoundary(t *testing.T) {

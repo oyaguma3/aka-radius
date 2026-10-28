@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: aka-radius 管理API
-  version: 2.0.0-draft
+  version: 2.0.0
   description: |
     加入者（状態・認証ベクターの取得先・認可ポリシーのルール）を操作し、ノードの状態と監査ログを読み出す API。
     MVP セットでは、管理クライアントは aka-provisioner だけ（設計概要 §11）。
@@ -16,20 +16,27 @@ info:
       `active` は物理削除できず、`terminated` は変更できない（aka-vecgen と同じ規則）。
     - 加入者の一括取得 `POST /subscribers/batch-get` を足した。
     - 鍵（`/subscribers/{imsi}/keys`）、認可ポリシー（`/policies`）、RADIUSクライアントの書き込みと `/clients/{id}/secret` をなくした。
-    - RADIUSクライアントと取得先の読み出し（`/clients`・`/sources`）は段階 2-5 で足す。
 
     2.0.0-draft（MVP セットの段階 2-4）:
     - セッションの一覧 `GET /sessions`（テナントか IMSI で絞る）と、利用の集計 `GET /usage`（日本時間の 1 日ごと）を足した。
     - `/status` に、セッションの数と数えた時刻（`sessionCount`・`sessionsCountedAt`）を足した。
 
+    2.0.0（MVP セットの段階 2-5）:
+    - RADIUS クライアントの一覧 `GET /clients`（共有シークレットは返さない。書き込みはノードの上のコマンド `aka-radius client`）と、
+      取得先の登録簿 `GET /sources`（証明書の主体名・期限・フィンガープリント、遮断器の状態。鍵とファイルのパスは返さない）を足した。
+    - `/status` に、RADIUS クライアントの数（`clientCount`）、取得先ごとの遮断器の状態（`circuitBreaker`）、
+      管理クライアントのピンを読んだ時刻（`adminClientsLoadedAt`）を足した。
+    - 監査ログを日ごとのファイルにも書くようにし、コマンドの操作（管理クライアント `cli`）も残すようにした。
+
     認証:
-    - mTLS 必須。サーバーに設定した管理クライアントの証明書（SHA-256 のフィンガープリント）だけを受け付ける
-      （段階 2-5 でピンのファイルと SIGHUP での読み直しにする）。
+    - mTLS 必須。管理クライアントのピンのファイル（`RADIUS_ADMIN_CLIENTS_FILE`）に書いた証明書（SHA-256 のフィンガープリント）だけを
+      受け付ける。ピンのファイルとサーバー証明書は SIGHUP で読み直す。同じ識別名に新旧 2 つのフィンガープリントを書ける。
     - 証明書なし、または未登録の証明書による接続は TLS ハンドシェイクで拒否する。
     - 管理クライアントは全権として扱う。誰が何をしてよいかは aka-ossbss が決める。
 
     監査ログ:
-    - 変更操作は監査ログ（Valkey の Stream `audit`）に記録する。日ごとのファイルへの書き出しは段階 2-5 で足す。
+    - 変更操作は監査ログに記録する（Valkey の Stream `audit` と、日ごとのファイル `audit-YYYYMMDD.jsonl`。日付は日本時間）。
+      ノードの上のコマンド（RADIUS クライアントの書き込み、管理API のサーバー証明書の作成）も、管理クライアント `cli` として記録する。
     - 管理クライアントは `X-Operator-Id` ヘッダーで操作者 ID を渡す。
 
     トレース:
@@ -58,6 +65,8 @@ tags:
     description: 加入者
   - name: sessions
     description: セッションと利用の集計
+  - name: config
+    description: RADIUS クライアントと取得先の登録簿（読み出しだけ）
   - name: logs
     description: 監査ログ
 
@@ -445,6 +454,46 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /clients:
+    parameters:
+      - $ref: '#/components/parameters/TraceId'
+    get:
+      tags: [config]
+      summary: RADIUS クライアントの一覧を取得する
+      operationId: listClients
+      description: |
+        RADIUS クライアント（エッジのトンネルの IP）を IP の順にすべて返す（エッジの数だけなので、ページ送りはしない）。
+        共有シークレットは返さない。登録・変更・削除はノードの上のコマンド `aka-radius client` だけで行う。
+      responses:
+        '200':
+          description: RADIUS クライアントの一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /sources:
+    parameters:
+      - $ref: '#/components/parameters/TraceId'
+    get:
+      tags: [config]
+      summary: 認証ベクターの取得先の登録簿を取得する
+      operationId: listSources
+      description: |
+        取得先の登録簿（ノードの上のファイル。SIGHUP で読み直す）を、ファイルの順に返す。鍵とファイルのパスは返さない。
+        遮断器の状態は auth が報告したもの（状態が変わったときと 30 秒ごと）。
+      responses:
+        '200':
+          description: 取得先の登録簿
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /audit-logs:
     parameters:
       - $ref: '#/components/parameters/TraceId'
@@ -730,15 +779,122 @@ components:
           type: integer
           format: int64
           description: この取得先を指す加入者の数。
+        circuitBreaker:
+          $ref: '#/components/schemas/CircuitBreaker'
+
+    CircuitBreaker:
+      type: object
+      description: |
+        auth が報告した取得先の遮断器の状態。報告がまだないか、その取得先が報告にない（登録簿を読み直した直後など）ときは返さない。
+        `reportedAt` が 1 分より古ければ、auth が止まっているか Valkey に書けていない。
+      required: [state, since, reportedAt]
+      properties:
+        state:
+          type: string
+          enum: [closed, half-open, open]
+        since:
+          type: string
+          format: date-time
+          description: 今の状態になった時刻（auth が起動したか登録簿を読み直したときは、その時刻）。
+        reportedAt:
+          type: string
+          format: date-time
+          description: auth が報告を書いた時刻。
+
+    Certificate:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          example: CN=aka-radius
+        notAfter:
+          type: string
+          format: date-time
+        fingerprint:
+          type: string
+          description: SHA-256 のフィンガープリント（16 進の小文字。クライアント証明書だけ）。取得先の側の登録と突き合わせる。
+          pattern: '^[0-9a-f]{64}$'
+
+    Source:
+      type: object
+      required: [id, name, baseUrl, timeoutMs, serverCas, subscriberCount]
+      properties:
+        id:
+          $ref: '#/components/schemas/SourceId'
+        name:
+          type: string
+        baseUrl:
+          type: string
+        timeoutMs:
+          type: integer
+        clientCertificate:
+          allOf:
+            - $ref: '#/components/schemas/Certificate'
+          description: aka-radius のクライアント証明書（読めなければ返さない）。
+        serverCas:
+          type: array
+          description: 取得先のサーバーの CA（読めなければ空）。
+          items:
+            $ref: '#/components/schemas/Certificate'
+        subscriberCount:
+          type: integer
+          format: int64
+          description: この取得先を指す加入者の数。
+        circuitBreaker:
+          $ref: '#/components/schemas/CircuitBreaker'
+
+    SourceList:
+      type: object
+      required: [items, loadedAt]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Source'
+        loadedAt:
+          type: string
+          format: date-time
+          description: admin が取得先の登録簿を読んだ日時。
+
+    Client:
+      type: object
+      required: [ip, name, trustStamp, createdAt, updatedAt]
+      properties:
+        ip:
+          type: string
+          description: RADIUS クライアント（エッジのトンネル）の IP。
+          example: 10.10.0.11
+        name:
+          type: string
+          example: edge-01
+        trustStamp:
+          type: boolean
+          description: このクライアントが付けたテナントの刻印を信頼するか（エッジは true）。
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ClientList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Client'
 
     Status:
       type: object
-      required: [version, build, nodeName, startedAt, subscriberCount, sources, sourcesLoadedAt, stampVendorId, stampVendorType, adminClients]
+      required: [version, build, nodeName, startedAt, subscriberCount, clientCount, sources, sourcesLoadedAt, stampVendorId, stampVendorType, adminClients, adminClientsLoadedAt]
       properties:
         version:
           type: string
           description: 管理API の版。
-          example: 2.0.0-draft
+          example: 2.0.0
         build:
           type: string
           description: ビルドの版。
@@ -750,6 +906,10 @@ components:
         subscriberCount:
           type: integer
           format: int64
+        clientCount:
+          type: integer
+          format: int64
+          description: RADIUS クライアントの数。
         sessionCount:
           type: integer
           format: int64
@@ -760,7 +920,7 @@ components:
           description: セッションの数を数えた時刻。
         sources:
           type: array
-          description: 取得先の登録簿の取得先（ファイルの順）。遮断器の状態は段階 2-5 で足す。
+          description: 取得先の登録簿の取得先（ファイルの順）。
           items:
             $ref: '#/components/schemas/SourceStatus'
         sourcesLoadedAt:
@@ -777,9 +937,13 @@ components:
           example: 1
         adminClients:
           type: array
-          description: 管理クライアントの識別名。
+          description: 管理クライアントの識別名（辞書順）。
           items:
             type: string
+        adminClientsLoadedAt:
+          type: string
+          format: date-time
+          description: admin が管理クライアントのピンのファイルを読んだ日時（SIGHUP で読み直す）。
 
     Session:
       type: object
@@ -894,6 +1058,10 @@ components:
         - subscriber.state
         - subscriber.reinstate
         - subscriber.delete
+        - client.create
+        - client.update
+        - client.delete
+        - admin-server-certificate.create
 
     AuditLogEntry:
       type: object
@@ -910,12 +1078,12 @@ components:
           description: 操作者 ID。`X-Operator-Id` が省略された場合は空文字列。
         mgmtClient:
           type: string
-          description: 管理クライアントの識別名。
+          description: 管理クライアントの識別名。ノードの上のコマンドの操作は `cli`。
         action:
           $ref: '#/components/schemas/AuditAction'
         target:
           type: string
-          description: 対象（IMSI）。
+          description: 対象（加入者は IMSI、RADIUS クライアントは IP、サーバー証明書は `aka-radius-admin`）。
         traceId:
           type: string
           description: トレースID（`X-Trace-ID`）。ログの `trace_id` と同じ。
@@ -926,6 +1094,7 @@ components:
             - 登録と削除では、その時点の `state`、`sourceId`、`rules` を含む。
             - 変更では、変更した項目の前後の値（`from`・`to`）を含む。
             - 状態の変更では `state` の前後、理由（`reason`）、同じ状態なら `unchanged`。
+            - RADIUS クライアントでは `name`・`trustStamp`（変更は前後の値）。共有シークレットは残さず、変えたときは `"secret": "changed"`。
           additionalProperties: true
 
     AuditLogList:

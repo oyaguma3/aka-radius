@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
@@ -90,4 +91,52 @@ func TestReloadSources(t *testing.T) {
 			t.Errorf("log = %s, want a WARN with count 0", out)
 		}
 	})
+}
+
+func TestReportBreakers(t *testing.T) {
+	fake := sourcetest.Start(t, "vecgen")
+	registry, err := source.LoadRegistry(fake.RegistryFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	st := source.NewStatusStore(rdb)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		reportBreakers(registry, st, time.Hour, stop)
+		close(done)
+	}()
+	defer func() { close(stop); <-done }()
+
+	// 起動のときに 1 回書く
+	var got source.Status
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, ok, err := st.Read(t.Context()); err == nil && ok {
+			got = s
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if b := got.Sources["vecgen"]; b.State != "closed" || got.ReportedAt.IsZero() {
+		t.Fatalf("status = %+v", got)
+	}
+
+	// 読み直すと（Changed）、間隔を待たずに書き直す
+	first := got.ReportedAt
+	time.Sleep(5 * time.Millisecond)
+	if err := registry.Reload(nil); err != nil {
+		t.Fatal(err)
+	}
+	for time.Now().Before(deadline) {
+		if s, _, _ := st.Read(t.Context()); s.ReportedAt.After(first) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("status was not rewritten after the reload")
 }

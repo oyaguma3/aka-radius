@@ -272,6 +272,15 @@ func TestFetch_CircuitBreaker(t *testing.T) {
 	if c.State() != "open" {
 		t.Errorf("breaker = %s, want open", c.State())
 	}
+	// 状態が変わったことを Changed で知らせ、Breakers に出す
+	select {
+	case <-reg.Changed():
+	default:
+		t.Error("Changed() did not fire")
+	}
+	if b := reg.Breakers()["vecgen"]; b.State != "open" || time.Since(b.Since) > 10*time.Second {
+		t.Errorf("Breakers() = %+v", b)
+	}
 
 	// 読み直すと、遮断器は閉じた状態から始まる
 	if err := reg.Reload(nil); err != nil {
@@ -280,6 +289,19 @@ func TestFetch_CircuitBreaker(t *testing.T) {
 	c, _ = reg.Get("vecgen")
 	if c.State() != "closed" {
 		t.Errorf("breaker after reload = %s, want closed", c.State())
+	}
+}
+
+func TestProbe(t *testing.T) {
+	_, fake, reg := newService(t)
+	c, _ := reg.Get("vecgen")
+	code, err := c.Probe(context.Background())
+	if err != nil || code == 0 {
+		t.Errorf("Probe() = %d %v", code, err)
+	}
+	fake.SetHandler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	if code, err := c.Probe(context.Background()); err != nil || code != http.StatusTeapot {
+		t.Errorf("Probe() = %d %v", code, err)
 	}
 }
 
@@ -408,6 +430,9 @@ func TestReadInfos(t *testing.T) {
 	}
 	if len(infos) != 1 || infos[0].ID != "vecgen" || infos[0].Name != "fake vecgen" || infos[0].NotAfter.IsZero() || infos[0].Timeout != time.Second {
 		t.Fatalf("infos = %+v", infos)
+	}
+	if len(infos[0].ClientCertFingerprint) != 64 || infos[0].ClientCertSubject == "" || len(infos[0].ServerCAs) != 1 || infos[0].ServerCAs[0].NotAfter.IsZero() {
+		t.Errorf("certificate infos = %+v", infos[0])
 	}
 	for name, body := range map[string]string{
 		"unknown field": `{"sources":[],"x":1}`,

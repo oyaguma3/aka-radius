@@ -17,7 +17,7 @@ func TestLoadCommon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCommon() returned error: %v", err)
 	}
-	want := Common{ValkeyHost: "localhost", ValkeyPort: "16379", ValkeyPassword: "secret", LogLevel: "DEBUG", LogMaskIMSI: true}
+	want := Common{ValkeyHost: "localhost", ValkeyPort: "16379", ValkeyPassword: "secret", LogLevel: "DEBUG", LogMaskIMSI: true, HealthAddr: DefaultHealthAddr}
 	if c != want {
 		t.Errorf("LoadCommon() = %+v, want %+v", c, want)
 	}
@@ -33,7 +33,7 @@ func TestLoadCommonDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCommon() returned error: %v", err)
 	}
-	want := Common{ValkeyHost: "valkey", ValkeyPort: "6379", ValkeyPassword: "secret", LogLevel: "INFO", LogMaskIMSI: false}
+	want := Common{ValkeyHost: "valkey", ValkeyPort: "6379", ValkeyPassword: "secret", LogLevel: "INFO", LogMaskIMSI: false, HealthAddr: DefaultHealthAddr}
 	if c != want {
 		t.Errorf("LoadCommon() = %+v, want %+v", c, want)
 	}

@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sony/gobreaker"
@@ -43,6 +44,8 @@ type Client struct {
 	http      *http.Client
 	transport *http.Transport
 	cb        *gobreaker.CircuitBreaker
+	// since は遮断器の状態が今の状態になった時刻（UnixNano。/status に出す。段階 2-5 の K4）
+	since atomic.Int64
 }
 
 // clientOptions は Client を作るための設定（登録簿の 1 件から作る）。
@@ -52,6 +55,8 @@ type clientOptions struct {
 	ClientCert tls.Certificate
 	ServerCAs  *x509.CertPool
 	Timeout    time.Duration
+	// OnChange は遮断器の状態が変わったときに呼ぶ（nil なら呼ばない）。遮断器の中から呼ぶので、すぐに戻ること。
+	OnChange func()
 }
 
 // newClient は取得先のクライアントを作る。
@@ -78,6 +83,7 @@ func newClient(o clientOptions) *Client {
 		// 要求 1 回のタイムアウトは接続を含む（契約 §11.1）。再試行はしない
 		http: &http.Client{Transport: transport, Timeout: o.Timeout},
 	}
+	c.since.Store(time.Now().UnixNano())
 	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        o.ID,
 		MaxRequests: cbMaxRequests,
@@ -93,6 +99,10 @@ func newClient(o clientOptions) *Client {
 			return err == nil || KindOf(err) == KindRejected
 		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
+			c.since.Store(time.Now().UnixNano())
+			if o.OnChange != nil {
+				o.OnChange()
+			}
 			attrs := []any{"source_id", name, "from", from.String(), "to", to.String()}
 			switch to {
 			case gobreaker.StateOpen:
@@ -113,8 +123,15 @@ func (c *Client) close() {
 }
 
 // State は遮断器の状態を返す（closed / half-open / open）。
+// 開いてから決まった時間が過ぎていれば、ここで半開きに移る（gobreaker は状態を見たときに移す）。
 func (c *Client) State() string {
 	return c.cb.State().String()
+}
+
+// Breaker は遮断器の状態と、その状態になった時刻を返す。
+func (c *Client) Breaker() BreakerStatus {
+	state := c.State() // 先に状態を見て、半開きへの移りを since に反映させる
+	return BreakerStatus{State: state, Since: time.Unix(0, c.since.Load()).UTC()}
 }
 
 // avRequest は GenerateAv の要求の本文（契約 §6.2）。
@@ -297,4 +314,21 @@ func parseProblem(contentType string, data []byte) (string, bool) {
 func isTimeout(err error) bool {
 	var te interface{ Timeout() bool }
 	return errors.As(err, &te) && te.Timeout()
+}
+
+// Probe は、遮断器を通さずに取得先の基底の URL へ GET を 1 回送り、HTTP の応答の状態を返す（コマンド sources check）。
+// 応答が返れば、名前の解決・TCP・TLS（サーバー証明書の検証と、取得先によるクライアント証明書の受け入れ）が通っている。
+// 応答の状態は問わない（契約に疎通確認の口はないので、404 などが返る）。
+func (c *Client) Probe(ctx context.Context) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+	_ = resp.Body.Close()
+	return resp.StatusCode, nil
 }

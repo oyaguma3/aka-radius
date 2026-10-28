@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/oyaguma3/aka-radius/internal/auth/config"
 	"github.com/oyaguma3/aka-radius/internal/auth/engine"
@@ -16,6 +17,7 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/session"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
 	"github.com/oyaguma3/aka-radius/internal/auth/store"
+	"github.com/oyaguma3/aka-radius/internal/health"
 	"github.com/oyaguma3/aka-radius/internal/logging"
 	"github.com/oyaguma3/aka-radius/internal/radiussrv"
 	"github.com/oyaguma3/aka-radius/internal/sessions"
@@ -79,6 +81,16 @@ func Main(build string) {
 
 	slog.Info("Valkey接続完了", "addr", cfg.ValkeyAddr())
 
+	// healthcheck の口（ループバック。Valkey に届くかを返す。MVP の設計概要 §5）
+	healthSrv, err := health.Start(cfg.HealthAddr, func(ctx context.Context) error {
+		return valkeyClient.Client().Ping(ctx).Err()
+	}, slog.Default())
+	if err != nil {
+		slog.Error("healthcheck の口の待ち受け失敗", "event_id", "SYS_LISTEN_ERR", "addr", cfg.HealthAddr, "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = healthSrv.Close() }()
+
 	// 5. RADIUS サーバー
 	subs := subscriber.NewStore(valkeyClient.Client())
 	srv := newServer(cfg, valkeyClient, registry)
@@ -92,17 +104,48 @@ func Main(build string) {
 		}
 	}()
 
+	// 遮断器の状態を Valkey に報告する（admin が /status と /sources に出す。状態が変わったときと 30 秒ごと）
+	stopReport := make(chan struct{})
+	defer close(stopReport)
+	go reportBreakers(registry, source.NewStatusStore(valkeyClient.Client()), breakerReportInterval, stopReport)
+
 	// 7. サーバー起動、シグナル待機 → Graceful Shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	if err := radiussrv.Run(srv, cfg.ListenAddr, sigCh, config.ShutdownTimeout); err != nil {
 		// 待ち受けを開始できない（ポートが使用中など）か、異常終了した。プロセスを終えて、compose の restart で
-		// 起動し直させる（終了しないと、待ち受けていないのに pgrep の healthcheck が通ってしまう）
+		// 起動し直させる
 		slog.Error("サーバーエラー", "event_id", "SYS_LISTEN_ERR", "addr", cfg.ListenAddr, "error", err)
 		os.Exit(1)
 	}
 
 	slog.Info("auth停止完了")
+}
+
+// breakerReportInterval は遮断器の状態を報告する間隔（状態が変わったときは、すぐに報告する）。
+const breakerReportInterval = 30 * time.Second
+
+// reportBreakers は遮断器の状態を Valkey（stat:sources）に書く。書けなくても続ける（次の機会に書く）。
+func reportBreakers(registry *source.Registry, st *source.StatusStore, interval time.Duration, stop <-chan struct{}) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	failing := false
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := st.Write(ctx, source.Status{ReportedAt: time.Now().UTC(), Sources: registry.Breakers()})
+		cancel()
+		// 書けないあいだは、最初の 1 回だけ出す（Valkey が止まっていると 30 秒ごとに出てしまうため）
+		if err != nil && !failing {
+			slog.Warn("遮断器の状態の報告に失敗", "event_id", "SOURCES_STATUS_WRITE_ERR", "error", err)
+		}
+		failing = err != nil
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		case <-registry.Changed():
+		}
+	}
 }
 
 // newServer は auth の RADIUS サーバーを組み立てる（試験でも使う）。

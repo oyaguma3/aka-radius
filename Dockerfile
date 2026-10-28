@@ -1,5 +1,5 @@
-# aka-radius のイメージ。サブコマンド（auth・acct・admin・gateway）ごとに別々のコンテナで動かす
-# （compose の command でサブコマンドを渡す）。
+# aka-radius のイメージ。サブコマンド（auth・acct・admin）ごとに別々のコンテナで動かす
+# （compose の command でサブコマンドを渡す）。運用のコマンド（client・sources・admin-cert など）も同じバイナリ。
 
 # ビルドステージ
 FROM golang:1.27.3-bookworm AS builder
@@ -18,14 +18,10 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.build=${VERSION}" -o /out/aka-radius ./cmd/aka-radius
 
 # ランタイムステージ
-# healthcheck の口（段階 2-5）ができるまでは、pgrep（procps）と curl（gateway の /health）を使うため slim にする
-FROM debian:12.15-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+# healthcheck はコマンド aka-radius healthcheck（ループバックの口）で行うので、シェルも curl も pgrep も要らない。
+# UID 65532（nonroot）で動く。マウントするファイル（取得先の鍵、ピン、管理API の証明書、監査ログのディレクトリ）は
+# この UID で読み書きできるようにする（README の「起動」。aka-vecgen と同じ）。
+FROM gcr.io/distroless/static-debian13:nonroot
 
 COPY --from=builder /out/aka-radius /usr/local/bin/aka-radius
 
