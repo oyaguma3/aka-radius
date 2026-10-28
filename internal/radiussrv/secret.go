@@ -43,6 +43,29 @@ func (s *valkeyClientStore) GetClientSecret(ctx context.Context, ip string) (str
 	return secret, nil
 }
 
+// StampTrust は、RADIUS クライアントの「刻印を信頼する」の印（client:{IP} の trust_stamp が 1）を引く（MVP の設計概要 §8.3）。
+type StampTrust struct {
+	rdb *redis.Client
+}
+
+// NewStampTrust は StampTrust を作る。
+func NewStampTrust(rdb *redis.Client) *StampTrust {
+	return &StampTrust{rdb: rdb}
+}
+
+// TrustsStamp は、送信元の RADIUS クライアントの刻印を使ってよいかを返す。
+// 登録のない送信元（予備の共有シークレットで受けたもの）と、印のない RADIUS クライアントは false。
+func (s *StampTrust) TrustsStamp(ctx context.Context, ip string) (bool, error) {
+	v, err := s.rdb.HGet(ctx, keyPrefixClient+ip, "trust_stamp").Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("valkey unavailable: %w", err)
+	}
+	return v == "1", nil
+}
+
 // DynamicSecretSource はValkey登録情報に基づくRADIUS Secret解決を行う。
 // layeh.com/radius.SecretSourceインターフェースの実装。
 type DynamicSecretSource struct {

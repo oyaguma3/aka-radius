@@ -15,11 +15,14 @@ import (
 // layeh.com/radius.Handlerインターフェースの実装。
 type Handler struct {
 	engine eap.EAPProcessor
+	// stampVendorID・stampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（MVP の設計概要 §8.3）
+	stampVendorID   uint32
+	stampVendorType byte
 }
 
-// NewHandler は新しいHandlerを生成する
-func NewHandler(engine eap.EAPProcessor) *Handler {
-	return &Handler{engine: engine}
+// NewHandler は新しいHandlerを生成する。stampVendorID・stampVendorType はテナントの刻印の Vendor-Specific。
+func NewHandler(engine eap.EAPProcessor, stampVendorID uint32, stampVendorType byte) *Handler {
+	return &Handler{engine: engine, stampVendorID: stampVendorID, stampVendorType: stampVendorType}
 }
 
 // ServeRADIUS はRADIUSリクエストを処理する
@@ -123,10 +126,12 @@ func (h *Handler) handleAccessRequest(w radius.ResponseWriter, r *radius.Request
 		UserName:      userName,
 		State:         state,
 		EAPMessage:    eapMessage,
+		Stamps:        radiuspkg.GetVendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType),
 	}
 
-	// EAPエンジン処理（エンジンは内部エラーをログに記録してRejectに変換するため、常に結果を返す）
-	result := h.engine.Process(context.Background(), eapReq)
+	// EAPエンジン処理（エンジンは内部エラーをログに記録してRejectに変換するため、常に結果を返す）。
+	// context は受け口（radiussrv.Guard）が付けた要求の期限つき
+	result := h.engine.Process(r.Context(), eapReq)
 
 	// 結果に基づいてRADIUS応答を構築
 	switch result.Action {

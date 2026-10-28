@@ -248,7 +248,7 @@
 ### 11.1 認証・ヘッダー・エラー
 
 - mTLS 必須。管理クライアントのピンはファイル（`RADIUS_ADMIN_CLIENTS_FILE`）で、`SIGHUP` で読み直す。同じ識別名に新旧 2 つのフィンガープリントを書ける（aka-vecgen の決定事項 7）。
-- `X-Operator-Id`、`X-Trace-ID` は本PoC と同じ。エラーは ProblemDetails で `cause` を入れる。主な `cause`: `VALIDATION_ERROR`、`SUBSCRIBER_NOT_FOUND`、`SUBSCRIBER_EXISTS`、`SUBSCRIBER_ACTIVE`、`SUBSCRIBER_TERMINATED`、`STATE_TRANSITION_NOT_ALLOWED`、`UNKNOWN_SOURCE`、`SYSTEM_FAILURE`。
+- `X-Operator-Id`、`X-Trace-ID` は本PoC と同じ。エラーは ProblemDetails で `cause` を入れる。`cause` は本PoC の Provisioning API 0.4.0 の名前を残し（`INVALID_MSG_FORMAT`・`INVALID_QUERY_PARAM`・`MANDATORY_IE_MISSING`・`MANDATORY_IE_INCORRECT`・`OPTIONAL_IE_INCORRECT`・`USER_NOT_FOUND`・`SUBSCRIBER_ALREADY_EXISTS`・`SYSTEM_FAILURE`）、MVP で足す誤りは aka-vecgen と同じ名前（`SUBSCRIBER_ACTIVE`・`SUBSCRIBER_TERMINATED`・`STATE_TRANSITION_NOT_ALLOWED`）、aka-radius だけにある `UNKNOWN_SOURCE` を足す（段階 2-3 の G11。前の版の `VALIDATION_ERROR`・`SUBSCRIBER_NOT_FOUND`・`SUBSCRIBER_EXISTS` は、aka-vecgen 2-1 で「もとの名前を残す」と決める前に書いたもの）。
 - `Idempotency-Key` は扱わない。再送の判定は aka-provisioner に任せる（aka-vecgen の決定事項 11 と同じ）。
 
 ### 11.2 口
@@ -290,7 +290,7 @@
 ## 13. ログと監査ログ
 
 - ログの経路は本PoC のまま、Docker のログドライバー `fluentd` から Fluent Bit に送り、アプリごとのファイルに書く（§18 の C10）。ホストの logrotate で日ごとに圧縮し、ノードで 2 週間持つ（本PoC は 30 世代）。監視用の PC が取りに行く（概要 §13）。データ面の aka-vecgen も同じ Fluent Bit に送る。
-- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`、`AUTH_DUPLICATE_REPLAYED`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`。
+- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`・`AUTH_STAMP_LOOKUP_ERR`、`AUTH_SUBSCRIBER_INVALID`・`AUTH_SUBSCRIBER_LOOKUP_ERR`、`EAP_IDENTITY_MISMATCH`、`AUTH_DUPLICATE_REPLAYED`・`ACCT_DUPLICATE_REPLAYED`、`RADIUS_OVERLOAD`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`。
 - `RADIUS_LOG_MASK_IMSI` の既定を `false` にする（決定事項 26）。
 - 監査ログは Valkey の Stream（件数の上限つき）と、日ごとの追記だけの JSONL のファイル（`RADIUS_AUDIT_DIR`）に書く（aka-vecgen の決定事項 9）。本PoC の「標準出力が正本、Stream が写し」と、Admin-TUI のリダイレクト頼みの監査ログは、この 1 系統にまとめる。
 
@@ -331,7 +331,7 @@
 | 1 | リポジトリ `aka-radius` を作り、本PoC の履歴ごと移す。改名だけ（module パス、コマンド、環境変数の接頭辞、Docker のネットワーク名、イメージ名、文書） | 今の CI が通る |
 | 2-1 | 1 つのモジュールと 1 つのコマンドにまとめ、Admin-TUI と vector-api を外す。auth と acct の共通の部分をまとめる（Gin はこの手順では外さない。2-2 と 2-3 で口ごと消える） | 単体、ビルド |
 | 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7。gateway の Gin が消える） | 単体、aka-vecgen との結合、検証機での最初の通し（eapaka_test で EAP-AKA・EAP-AKA'・再同期） |
-| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限、管理API 2.0.0 の加入者の口（provisioning-api を置き換える。Gin がすべて消える） | 単体、結合 |
+| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限、管理API 2.0.0 の加入者の口（provisioning-api を置き換える。Gin がすべて消える） | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-3 で決めたこと」 |
 | 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合 |
 | 2-5 | 管理API 2.0.0 の残り（RADIUS クライアントと取得先の読み出し）、コマンド、ピンのファイル、監査ログの書き出し、healthcheck、共有のネットワークの名前 `eapaka-prov` を決め直す | 結合 |
 | 2-6 | D-文書の改版、運用ガイド、README | 検証機で全体を通す（刻印はエッジの代わりの radsecproxy で付け、Accounting は radclient で送る） |
@@ -340,6 +340,22 @@
 - 2-1・2-2 は aka-vecgen の 2-1 の後に行う（概要 §18.5 の H1）。
 - 手順ごとに feature ブランチと develop への PR（squash）を作り、develop → main は段階 2 の終わりに 1 回だけ行う。D-文書は 2-6 でまとめて改版し、それまでは本書を正とする（概要 §18.5 の H6）。
 - aka-provisioner との契約の試験は、aka-provisioner を作り直す段階 3-1 で行う（概要 §18.5 の H4）。
+
+段階 2-3 で決めたこと（2026-10-28。確認事項 G1〜G12 はすべて推奨案で合意）:
+
+- G1: 1 つの feature ブランチと 1 つの PR にした（加入者のデータの形を変えると auth と admin が同時に変わるため）。
+- G2: 本PoC の形のデータ（鍵と SQN の入った `sub:`、`policy:`）は移し替えない。`state` のない `sub:` は、ベクターを取らずに拒否する（`AUTH_SUBSCRIBER_INVALID`）。管理API では 500 になる。
+- G3: `masterdata`・`model`・`validation`（と使われていない `apperr`・`httputil`）を、`internal/subscriber` に置き換えた。登録・変更・状態の変更・削除は Lua で `sub:`・`subs`・`cnt:src:{id}` を一度に書き換える（Lua の中で取得先ごとの数のキーを組み立てるので、Valkey は単一ノード）。ルールの評価（`subscriber.Match`）も同じパッケージにし、`internal/auth/policy` を消した。
+- G4: admin は取得先の登録簿のディレクトリを読み取り専用でマウントし、ID と証明書の期限だけを読む（鍵は読まない。`source.ReadInfos`）。`SIGHUP` で読み直す。auth は、加入者が指している取得先（`cnt:src:{id}` が 0 でない）を消す読み直しを断る（2-2 の B3）。
+- G5: RADIUS クライアントの「刻印を信頼する」の印（`client:{ip}` の `trust_stamp`）は auth が読むだけ。印を付けるのは、2-5 のコマンドができるまで Valkey に直接書く。予備の共有シークレットで受けた送信元は印なしとして扱う。
+- G6: IMSI は EAP-Response/Identity の Type-Data と AKA-Identity の AT_IDENTITY から取り、User-Name は判定に使わない（違えば `EAP_IDENTITY_MISMATCH`）。鍵の導出に使う Identity は `eap:` の `identity` に残し、再同期でも使う（RFC 4187 §7）。
+- G7: 要求の期限（`RADIUS_REQUEST_TIMEOUT`、既定 4 秒）と同時に処理する上限（`RADIUS_MAX_INFLIGHT`、既定 256）を、auth と acct に共通の受け口（`radiussrv.Guard`）に入れた。上限を超えた要求は応えずに捨て（`RADIUS_OVERLOAD`。1 秒に 1 回に間引く）、期限を過ぎた処理は拒否で終える。
+- G8: 重複応答のキャッシュは `radiussrv.Guard` に作り、auth と acct の両方に入れた（§9 のとおり。件数の上限 50,000、超えたら古いものから消す）。処理中の重複は捨て、応えなかった要求（捨てた、パニック）は印を残さない。
+- G9: Accept のときに `sess:` に `tenant_id` を書く。`eap:` に `identity`・`tenant_id`・`rule_index`・`vlan_id`・`session_timeout` を足した。セッションの索引の作り直しと利用の集計は 2-4。
+- G10: 管理API は `net/http` の `/admin/v2` で作り直し、`/status`・加入者の 8 つの口・`/audit-logs` にした。`/admin/v1` はすべてなくした（Gin が依存から消えた）。管理クライアントのピンは 2-5 まで `RADIUS_ADMIN_CLIENTS` のまま。監査ログの Stream は `audit` に改め、項目を aka-vecgen にそろえた（日ごとのファイルは 2-5）。RADIUS クライアントの ID の採番（本PoC の起動のときの処理）もなくした（RADIUS クライアントは 2-5 のコマンド）。
+- G11: §11.1 の `cause` の名前を直した。
+- G12: OpenAPI は `docs/openapi/admin-api.yaml`（2.0.0-draft）。`provisioning-api.yaml` は D-13 と一緒に 2-6 で廃止の記録をする。刻印を付けた通しは 2-6（エッジの代わりの radsecproxy）。
+- そのほか: IMSI は本PoC と同じ 15 桁、ルールの値の範囲（NAS-Identifier 253 バイト、SSID 32 バイト・32 個、VLAN 1〜4094、Session-Timeout 1〜86400 秒）も本PoC と同じ。SSID の `*` はほかの SSID と混ぜられない。`/status` に取得先ごとの加入者の数を出す（遮断器の状態は auth の中にあるので 2-5 で決める）。
 
 ### 17.2 D-文書の扱い（S4）
 

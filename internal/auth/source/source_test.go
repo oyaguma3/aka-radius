@@ -203,7 +203,7 @@ func TestFetch_Classification(t *testing.T) {
 func TestFetch_Timeout(t *testing.T) {
 	svc, fake, reg := newService(t)
 	fake.WriteRegistry(t, "200ms")
-	if err := reg.Reload(); err != nil {
+	if err := reg.Reload(nil); err != nil {
 		t.Fatal(err)
 	}
 	fake.SetHandler(func(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +274,7 @@ func TestFetch_CircuitBreaker(t *testing.T) {
 	}
 
 	// 読み直すと、遮断器は閉じた状態から始まる
-	if err := reg.Reload(); err != nil {
+	if err := reg.Reload(nil); err != nil {
 		t.Fatal(err)
 	}
 	c, _ = reg.Get("vecgen")
@@ -362,11 +362,64 @@ func TestRegistry_ReloadKeepsOldOnError(t *testing.T) {
 	if err := os.WriteFile(fake.RegistryFile, []byte(`{"sources":[{"id":"x"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.Reload(); err == nil {
+	if err := reg.Reload(nil); err == nil {
 		t.Fatal("Reload returned nil for a bad file")
 	}
 	if _, err := svc.Fetch(context.Background(), &source.Request{IMSI: testIMSI, Method: source.MethodAKA}); err != nil {
 		t.Errorf("Fetch after a failed reload: %v", err)
+	}
+}
+
+func TestRegistry_ReloadRefusesRemovingUsedSource(t *testing.T) {
+	// 消える取得先を確かめる関数が誤りを返せば、前の登録簿のまま続ける（MVP の設計概要 §7.1）。
+	svc, fake, reg := newService(t)
+	if err := os.WriteFile(fake.RegistryFile, []byte(`{"sources":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	err := reg.Reload(func(removed []string) error {
+		got = removed
+		return errors.New("in use")
+	})
+	if err == nil || len(got) != 1 || got[0] != "vecgen" {
+		t.Fatalf("Reload err=%v removed=%v", err, got)
+	}
+	if _, err := svc.Fetch(context.Background(), &source.Request{IMSI: testIMSI, Method: source.MethodAKA}); err != nil {
+		t.Errorf("Fetch after a refused reload: %v", err)
+	}
+	// 消してよければ読み直す
+	if err := reg.Reload(func([]string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.List()) != 0 {
+		t.Errorf("List = %v", reg.List())
+	}
+}
+
+func TestReadInfos(t *testing.T) {
+	fake := sourcetest.Start(t, "vecgen")
+	// 鍵のファイルがなくても読める（admin は鍵を読まない）
+	if err := os.Remove(filepath.Join(fake.Dir, "client.key")); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := source.ReadInfos(fake.RegistryFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ID != "vecgen" || infos[0].Name != "fake vecgen" || infos[0].NotAfter.IsZero() || infos[0].Timeout != time.Second {
+		t.Fatalf("infos = %+v", infos)
+	}
+	for name, body := range map[string]string{
+		"unknown field": `{"sources":[],"x":1}`,
+		"bad id":        `{"sources":[{"id":"BAD","baseUrl":"https://h/nudm-ueau/v1","clientCertFile":"a","clientKeyFile":"b","serverCaFile":"c"}]}`,
+		"duplicate":     `{"sources":[{"id":"a","baseUrl":"https://h/nudm-ueau/v1","clientCertFile":"a","clientKeyFile":"b","serverCaFile":"c"},{"id":"a","baseUrl":"https://h/nudm-ueau/v1","clientCertFile":"a","clientKeyFile":"b","serverCaFile":"c"}]}`,
+	} {
+		if err := os.WriteFile(fake.RegistryFile, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := source.ReadInfos(fake.RegistryFile); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
 

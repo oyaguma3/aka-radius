@@ -21,6 +21,14 @@ type EAPContext struct {
 	SourceID             string `redis:"source_id"` // ベクターを取った取得先（再同期で同じ取得先に要求する）
 	ResyncCount          int    `redis:"resync_count"`
 	PermanentIDRequested bool   `redis:"permanent_id_requested"`
+	// Identity は鍵の導出に使う端末の Identity（最後の AT_IDENTITY か EAP-Response/Identity。RFC 4187 §7）
+	Identity string `redis:"identity"`
+	// TenantID・RuleIndex は、ベクターを取る前の判定で使った刻印のテナントと、採ったルールの番号（MVP の設計概要 §6.1）
+	TenantID  int64 `redis:"tenant_id"`
+	RuleIndex int   `redis:"rule_index"`
+	// VlanID・SessionTimeout は採ったルールの値（Access-Accept に付ける。0 なら付けない）
+	VlanID         int `redis:"vlan_id"`
+	SessionTimeout int `redis:"session_timeout"`
 }
 
 // contextStore はContextStoreの実装。

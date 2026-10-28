@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oyaguma3/aka-radius/internal/auth/eap"
 	"github.com/oyaguma3/aka-radius/internal/auth/mocks"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
 	eapaka "github.com/oyaguma3/go-eapaka"
 	"go.uber.org/mock/gomock"
 	"layeh.com/radius"
@@ -89,7 +90,7 @@ func TestHandler_AccessRequest_Accept(t *testing.T) {
 			SessionTimeout: 3600,
 		})
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	eapMsg := buildTestEAPIdentity()
@@ -122,7 +123,7 @@ func TestHandler_AccessRequest_Challenge(t *testing.T) {
 			State:      []byte("trace-id"),
 		})
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	eapMsg := buildTestEAPIdentity()
@@ -152,7 +153,7 @@ func TestHandler_AccessRequest_Reject(t *testing.T) {
 			EAPMessage: []byte{4, 2, 0, 4}, // EAP-Failure
 		})
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	eapMsg := buildTestEAPIdentity()
@@ -181,7 +182,7 @@ func TestHandler_AccessRequest_Drop(t *testing.T) {
 			Action: eap.ActionDrop,
 		})
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	eapMsg := buildTestEAPIdentity()
@@ -204,7 +205,7 @@ func TestHandler_AccessRequest_NoMA(t *testing.T) {
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 	// Process呼び出しは期待しない
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	p := &radius.Packet{
@@ -230,7 +231,7 @@ func TestHandler_StatusServer(t *testing.T) {
 
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	p := &radius.Packet{
@@ -260,7 +261,7 @@ func TestHandler_StatusServer_InvalidMA(t *testing.T) {
 
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	p := &radius.Packet{
@@ -290,7 +291,7 @@ func TestHandler_StatusServer_NoMA(t *testing.T) {
 
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	p := &radius.Packet{
@@ -317,7 +318,7 @@ func TestHandler_UnknownCode(t *testing.T) {
 
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	p := &radius.Packet{
 		Code:       radius.CodeAccountingRequest,
@@ -374,7 +375,7 @@ func TestHandler_AccessRequest_TraceIDFromState(t *testing.T) {
 			}
 			setValidMessageAuthenticator(p, secret)
 
-			NewHandler(mockEngine).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: p})
+			NewHandler(mockEngine, 32473, 1).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: p})
 
 			if (gotTraceID == stateUUID) != tt.wantState {
 				t.Errorf("engine TraceID = %q, inherit state = %v", gotTraceID, tt.wantState)
@@ -415,7 +416,7 @@ func TestHandler_AccessRequest_WriteError(t *testing.T) {
 			SessionTimeout: 3600,
 		})
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	eapMsg := buildTestEAPIdentity()
@@ -438,7 +439,7 @@ func TestHandler_StatusServer_WriteError(t *testing.T) {
 
 	mockEngine := mocks.NewMockEAPProcessor(ctrl)
 
-	handler := NewHandler(mockEngine)
+	handler := NewHandler(mockEngine, 32473, 1)
 
 	secret := []byte("test-secret")
 	p := &radius.Packet{
@@ -525,7 +526,7 @@ func TestHandler_StatusServer_LogLevel(t *testing.T) {
 				_ = rfc2869.MessageAuthenticator_Set(p, make([]byte, 16))
 			}
 
-			NewHandler(mocks.NewMockEAPProcessor(ctrl)).
+			NewHandler(mocks.NewMockEAPProcessor(ctrl), 32473, 1).
 				ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: p})
 
 			got := logs()
@@ -552,7 +553,7 @@ func TestHandler_AccessRequest_PktRecvIsInfo(t *testing.T) {
 
 	secret := []byte("test-secret")
 	p := buildTestAccessRequest(secret, buildTestEAPIdentity())
-	NewHandler(mockEngine).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: p})
+	NewHandler(mockEngine, 32473, 1).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: p})
 
 	if got := logs()["PKT_RECV"]; got != "INFO" {
 		t.Errorf("PKT_RECV level = %q, want INFO", got)
@@ -613,7 +614,7 @@ func TestHandler_PktRecv_NASIdentifier(t *testing.T) {
 
 			mockEngine := mocks.NewMockEAPProcessor(ctrl)
 			mockEngine.EXPECT().Process(gomock.Any(), gomock.Any()).Return(&eap.Result{Action: eap.ActionDrop}).AnyTimes()
-			NewHandler(mockEngine).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: tt.packet()})
+			NewHandler(mockEngine, 32473, 1).ServeRADIUS(&mockResponseWriter{}, &radius.Request{Packet: tt.packet()})
 
 			var found bool
 			for line := range strings.Lines(buf.String()) {
@@ -638,4 +639,28 @@ func TestHandler_PktRecv_NASIdentifier(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandler_PassesStampsAndContext(t *testing.T) {
+	// 刻印（Vendor-Specific の値）と、受け口が付けた context をエンジンに渡す
+	ctrl := gomock.NewController(t)
+	mockEngine := mocks.NewMockEAPProcessor(ctrl)
+	type ctxKey struct{}
+	mockEngine.EXPECT().Process(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, req *eap.Request) *eap.Result {
+			if ctx.Value(ctxKey{}) != "guard" {
+				t.Error("the request context was not passed")
+			}
+			if len(req.Stamps) != 1 || string(req.Stamps[0]) != "42" {
+				t.Errorf("Stamps = %q", req.Stamps)
+			}
+			return &eap.Result{Action: eap.ActionDrop}
+		})
+	secret := []byte("test-secret")
+	p := buildTestAccessRequest(secret, buildTestEAPIdentity())
+	p.Add(rfc2865.VendorSpecific_Type, radius.Attribute{0, 0, 0x7e, 0xd9, 1, 4, '4', '2'}) // 32473 = 0x7ed9
+	p.Add(rfc2865.VendorSpecific_Type, radius.Attribute{0, 0, 0x7e, 0xd9, 2, 3, 'x'})      // 別の Vendor-Type
+	radiussrv.SetMessageAuthenticator(p, secret, p.Authenticator)
+	req := (&radius.Request{Packet: p}).WithContext(context.WithValue(context.Background(), ctxKey{}, "guard"))
+	NewHandler(mockEngine, 32473, 1).ServeRADIUS(&mockResponseWriter{}, req)
 }

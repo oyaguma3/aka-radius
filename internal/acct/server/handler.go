@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -70,7 +69,8 @@ func (h *Handler) handleAccountingRequest(w radius.ResponseWriter, r *radius.Req
 	}
 
 	// 3. Status-Type別処理（各処理は内部のエラーをログに記録して継続する）
-	ctx := context.Background()
+	// context は受け口（radiussrv.Guard）が付けた要求の期限つき
+	ctx := r.Context()
 	switch attrs.AcctStatusType {
 	case radiuspkg.AcctStatusTypeStart:
 		h.processor.ProcessStart(ctx, attrs, srcIP, traceID)

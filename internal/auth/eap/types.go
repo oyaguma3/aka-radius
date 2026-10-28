@@ -18,9 +18,11 @@ type Request struct {
 	SrcIP         string // 送信元IPアドレス
 	NASIdentifier string // NAS-Identifier属性
 	CalledStation string // Called-Station-Id属性
-	UserName      string // User-Name属性
+	UserName      string // User-Name属性（判定には使わず、ログに残すだけ。IMSI は EAP の Identity から取る）
 	State         []byte // RADIUS State属性（TraceID格納）
 	EAPMessage    []byte // EAP-Messageバイト列
+	// Stamps はテナントの刻印（Vendor-Specific の値）。信頼の印のない送信元の刻印も含み、エンジンが印を確かめる
+	Stamps [][]byte
 }
 
 // Result はEAP処理の結果を表す

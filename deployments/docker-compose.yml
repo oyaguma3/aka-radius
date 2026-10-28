@@ -42,6 +42,12 @@ services:
       RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
       RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
       RADIUS_EAP_AKA_PRIME_NETWORK_NAME: ${RADIUS_EAP_AKA_PRIME_NETWORK_NAME:-WLAN}
+      # テナントの刻印の Vendor-Specific（エッジの設定と同じ値にする。MVP の設計概要 §8.3）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
+      # 要求 1 つの処理の期限と、同時に処理する要求の上限（MVP の設計概要 §4）
+      RADIUS_REQUEST_TIMEOUT: ${RADIUS_REQUEST_TIMEOUT:-4s}
+      RADIUS_MAX_INFLIGHT: ${RADIUS_MAX_INFLIGHT:-256}
     volumes:
       # 取得先の登録簿（sources.json）と、取得先ごとのクライアント証明書・鍵・サーバーの CA（中身は .gitignore 対象）
       - ./sources:/etc/aka-radius/sources:ro
@@ -71,6 +77,8 @@ services:
     environment:
       <<: *radius-common-env
       RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
+      RADIUS_REQUEST_TIMEOUT: ${RADIUS_REQUEST_TIMEOUT:-4s}
+      RADIUS_MAX_INFLIGHT: ${RADIUS_MAX_INFLIGHT:-256}
     depends_on:
       valkey:
         condition: service_healthy
@@ -92,8 +100,8 @@ services:
   # ==========================================================================
   # Management Layer
   # ==========================================================================
-  # 管理API（本PoC の Provisioning API、D-13）。aka-provisioner から、加入者・RADIUSクライアント・
-  # 認可ポリシーを操作する REST API（HTTPS + mTLS）。証明書の準備が要るため
+  # 管理API 2.0.0（/admin/v2。MVP の設計概要 §11）。aka-provisioner から加入者（状態・取得先・認可ポリシー）を
+  # 操作する REST API（HTTPS + mTLS）。証明書の準備が要るため
   # profile に入れており、既定の `docker compose up` では起動しない。
   #   docker compose --profile admin up -d
   # 同じホストの呼び出し側（別の compose）は、ホストの 127.0.0.1 に届かないため、
@@ -113,11 +121,18 @@ services:
       # 管理クライアントの「識別名=フィンガープリント」。空なら起動しない
       RADIUS_ADMIN_CLIENTS: ${RADIUS_ADMIN_CLIENTS:-}
       RADIUS_ADMIN_NODE_NAME: ${RADIUS_ADMIN_NODE_NAME:-}
-      # GET /audit-logs で参照できる監査ログ（Valkey の Stream audit:prov）の件数の上限
+      # GET /audit-logs で参照できる監査ログ（Valkey の Stream audit）の件数の上限
       RADIUS_ADMIN_AUDIT_MAX: ${RADIUS_ADMIN_AUDIT_MAX:-10000}
+      # 取得先の登録簿（auth と同じファイル）。加入者の sourceId を確かめ、/status に出す。鍵は読まない。
+      # 登録簿を直したら docker compose kill -s HUP auth admin で両方に読み直させる
+      RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
+      # /status に出すテナントの刻印の Vendor-Id と Vendor-Type（auth と同じ値にする）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
     volumes:
       # サーバー証明書（server.pem / server.key）。SAN に DNS:provisioning-api を入れる
       - ./certs/provisioning:/certs:ro
+      - ./sources:/etc/aka-radius/sources:ro
     networks:
       default:
       # 同じホストの呼び出し側用の共有ネットワーク（admin だけを参加させる）。

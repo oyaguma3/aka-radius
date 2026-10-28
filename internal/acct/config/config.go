@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/oyaguma3/aka-radius/internal/envconf"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
 )
 
 // Config はアプリケーション設定を保持する
@@ -16,6 +17,8 @@ type Config struct {
 	FallbackSecret string
 	// ListenAddr は待ち受けアドレス（RADIUS_ACCT_LISTEN_ADDR、既定 :1813）
 	ListenAddr string
+	// Guard は要求の期限と同時に処理する上限（RADIUS_REQUEST_TIMEOUT、RADIUS_MAX_INFLIGHT）
+	Guard radiussrv.GuardConfig
 }
 
 // Load は環境変数から設定を読み込む
@@ -24,9 +27,14 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	guard, err := radiussrv.LoadGuardConfig()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Common:         common,
 		FallbackSecret: envconf.String("RADIUS_FALLBACK_SECRET", ""),
 		ListenAddr:     envconf.String("RADIUS_ACCT_LISTEN_ADDR", ":1813"),
+		Guard:          guard,
 	}, nil
 }
