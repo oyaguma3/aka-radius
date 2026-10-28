@@ -79,6 +79,33 @@ func TestGuard_ReplaysCachedResponse(t *testing.T) {
 	}
 }
 
+// probeWriter は、応答を送る瞬間に同じ要求の再送が届いたときのキャッシュの状態を記録する。
+type probeWriter struct {
+	g     *Guard
+	key   replayKey
+	state replayState
+	pkt   *radius.Packet
+}
+
+func (p *probeWriter) Write(pkt *radius.Packet) error {
+	p.pkt, p.state = p.g.cache.begin(p.key, time.Now())
+	return nil
+}
+
+func TestGuard_CachesBeforeSending(t *testing.T) {
+	// 応答が NAS に届いてすぐに来た再送にも、前の応答を送り直せる（応答はキャッシュに入れてから送る）
+	h := radius.HandlerFunc(func(w radius.ResponseWriter, r *radius.Request) {
+		_ = w.Write(r.Response(radius.CodeAccessAccept))
+	})
+	g := NewGuard("AUTH", testConfig(), h)
+	req := testRequest(7, 50000)
+	w := &probeWriter{g: g, key: keyOf(req)}
+	g.ServeRADIUS(w, req)
+	if w.state != replayCached || w.pkt == nil || w.pkt.Code != radius.CodeAccessAccept {
+		t.Errorf("state at send = %d (pkt %v), want cached", w.state, w.pkt)
+	}
+}
+
 func TestGuard_DropsDuplicateInFlight(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})

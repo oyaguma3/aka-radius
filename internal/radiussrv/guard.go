@@ -113,12 +113,12 @@ func (g *Guard) ServeRADIUS(w radius.ResponseWriter, r *radius.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), g.timeout)
 	defer cancel()
-	cw := &captureWriter{w: w}
-	// ハンドラーがパニックしても、キャッシュの処理中の印を残さない（recoverHandler が外側で回復する）
+	// 応答はキャッシュに入れてから送る（送ってからだと、その間に届いた再送を処理中として捨ててしまう）
+	cw := &captureWriter{w: w, onWrite: func(p *radius.Packet) { g.cache.finish(key, p, time.Now()) }}
+	// 応答を送らなかったとき（ハンドラーがパニックしたときも）は、キャッシュの処理中の印を残さない
+	// （recoverHandler が外側で回復する）
 	defer func() {
-		if cw.pkt != nil {
-			g.cache.finish(key, cw.pkt, time.Now())
-		} else {
+		if cw.pkt == nil {
 			g.cache.abort(key)
 		}
 	}()
@@ -141,13 +141,17 @@ func (g *Guard) logOverload(now time.Time) {
 	)
 }
 
-// captureWriter は送った応答を覚える。
+// captureWriter は送った応答を覚え、送る前に onWrite に渡す（最初の応答だけ）。
 type captureWriter struct {
-	w   radius.ResponseWriter
-	pkt *radius.Packet
+	w       radius.ResponseWriter
+	pkt     *radius.Packet
+	onWrite func(*radius.Packet)
 }
 
 func (c *captureWriter) Write(p *radius.Packet) error {
+	if c.pkt == nil {
+		c.onWrite(p)
+	}
 	c.pkt = p
 	return c.w.Write(p)
 }
