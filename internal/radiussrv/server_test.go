@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,5 +130,121 @@ func TestRecoverHandler_PassThrough(t *testing.T) {
 	h.ServeRADIUS(nil, &radius.Request{Packet: radius.New(radius.CodeAccessRequest, []byte("secret"))})
 	if !called {
 		t.Error("handler was not called")
+	}
+}
+
+// startGuarded は、Guard を付けたハンドラーで本物の UDP のサーバーを立て、つないだ UDP の接続を返す。
+func startGuarded(t *testing.T, h radius.Handler) (*Server, net.Conn) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(pc.LocalAddr().String(), NewGuard("AUTH", GuardConfig{RequestTimeout: 4 * time.Second, MaxInFlight: 16}, h),
+		radius.StaticSecretSource([]byte("testing123")))
+	go func() { _ = s.Serve(pc) }()
+	conn, err := net.Dial("udp", pc.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return s, conn
+}
+
+func readResponse(t *testing.T, conn net.Conn, wait time.Duration) *radius.Packet {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(wait))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil
+	}
+	p, err := radius.Parse(buf[:n], []byte("testing123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestServer_RetransmissionRightAfterResponse は、応答を送った直後（ハンドラーが戻る前）に届いた再送にも、
+// 前の応答を送り直すことを、本物の UDP で確かめる（段階 2-6 の確認事項 M11。ライブラリの重複の判定に捨てさせない）。
+func TestServer_RetransmissionRightAfterResponse(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	h := radius.HandlerFunc(func(w radius.ResponseWriter, r *radius.Request) {
+		calls.Add(1)
+		_ = w.Write(r.Response(radius.CodeAccessAccept))
+		<-release // 応答の後のログや後片付けがまだ終わっていない
+	})
+	s, conn := startGuarded(t, h)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = s.Shutdown(ctx)
+	})
+	defer close(release)
+
+	req := radius.New(radius.CodeAccessRequest, []byte("testing123"))
+	raw, err := req.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"最初の要求", "再送"} {
+		if _, err := conn.Write(raw); err != nil {
+			t.Fatal(err)
+		}
+		resp := readResponse(t, conn, 2*time.Second)
+		if resp == nil || resp.Code != radius.CodeAccessAccept {
+			t.Fatalf("%s（%d 回目）への応答 = %v", name, i+1, resp)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Errorf("handler calls = %d, want 1 (the retransmission is replayed from the cache)", calls.Load())
+	}
+}
+
+// TestServer_ShutdownWaitsForInFlight は、停止のときに処理中のパケットが応答を送り終えるまで待つことを確かめる。
+func TestServer_ShutdownWaitsForInFlight(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	h := radius.HandlerFunc(func(w radius.ResponseWriter, r *radius.Request) {
+		close(started)
+		<-release
+		_ = w.Write(r.Response(radius.CodeAccessAccept))
+	})
+	s, conn := startGuarded(t, h)
+	raw, err := radius.New(radius.CodeAccessRequest, []byte("testing123")).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopped <- s.Shutdown(ctx)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("Shutdown returned before the in-flight packet was answered")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if resp := readResponse(t, conn, 2*time.Second); resp == nil || resp.Code != radius.CodeAccessAccept {
+		t.Fatalf("response during shutdown = %v", resp)
+	}
+	if err := <-stopped; err != nil {
+		t.Errorf("Shutdown = %v", err)
+	}
+
+	// 停止を始めた後のパケットは処理しない
+	if _, err := conn.Write(raw); err == nil {
+		if resp := readResponse(t, conn, 300*time.Millisecond); resp != nil {
+			t.Errorf("response after shutdown = %v", resp)
+		}
 	}
 }
