@@ -1,6 +1,10 @@
-// Package audit は管理API の監査ログを Valkey の Stream（audit）に書き、読み出す（MVP の設計概要 §13）。
-// 項目は aka-vecgen の監査ログにそろえる（時刻、操作者、管理クライアント、操作、対象、変更の内容、トレースID）。
-// 日ごとのファイル（JSONL）への書き出しは段階 2-5 で足す。
+// Package audit は管理API とコマンドの監査ログを残す（MVP の設計概要 §13）。
+//
+// 監査ログは 2 か所に書く。Valkey の Stream（audit。件数の上限つき。管理API の GET /audit-logs で見る）と、
+// 日ごとの追記だけのファイル（<dir>/audit-YYYYMMDD.jsonl。日付は日本時間で区切る）。
+// ファイルは監視用の PC が取りに行く。前の日までのファイルは gzip で圧縮し、保存の日数を過ぎたものは消す。
+// 管理API とコマンドが同じファイルに書く（どちらも O_APPEND で 1 行ずつ書く）。
+// 項目とファイルの形は aka-vecgen の監査ログにそろえる（時刻、操作者、管理クライアント、操作、対象、変更の内容、トレースID）。
 package audit
 
 import (
@@ -45,21 +49,35 @@ type Entry struct {
 	TraceID string
 }
 
-// Recorder は監査ログを Stream に書き、ログ（AUDIT）にも出す。
+// Recorder は監査ログを Stream と日ごとのファイルに書き、ログ（AUDIT）にも出す。
 type Recorder struct {
 	rdb *redis.Client
 	// maxLen は Stream に持つ件数の上限（おおよそ。超えた分は古いものから捨てる）
 	maxLen int64
-	log    *slog.Logger
+	// files は日ごとのファイル。nil なら書かない。
+	files *Files
+	log   *slog.Logger
+	now   func() time.Time
 }
 
-// NewRecorder は Recorder を作る。
-func NewRecorder(rdb *redis.Client, maxLen int64, log *slog.Logger) *Recorder {
-	return &Recorder{rdb: rdb, maxLen: maxLen, log: log}
+// NewRecorder は Recorder を作る。files が nil なら日ごとのファイルには書かない。
+func NewRecorder(rdb *redis.Client, maxLen int64, files *Files, log *slog.Logger) *Recorder {
+	return &Recorder{rdb: rdb, maxLen: maxLen, files: files, log: log, now: time.Now}
 }
 
-// Record は監査ログを 1 件書く。書けなくても操作は成功として扱い、ログに AUDIT_WRITE_ERR を出す。
+// Record は監査ログを 1 件書く。書けなくても操作は成功として扱い、ログに AUDIT_WRITE_ERR を出す
+// （操作そのものは終わっているため。aka-vecgen と同じ）。
 func (r *Recorder) Record(ctx context.Context, e Entry) {
+	e.Time = r.now()
+	r.log.Info("audit",
+		"event_id", "AUDIT",
+		"trace_id", e.TraceID,
+		"operator", e.Operator,
+		"mgmt_client", e.MgmtClient,
+		"action", e.Action,
+		"target", e.Target,
+		"detail", e.Detail,
+	)
 	// 要求が途中で切れても書くことは試みる。
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
 	defer cancel()
@@ -77,23 +95,24 @@ func (r *Recorder) Record(ctx context.Context, e Entry) {
 		},
 	}).Result()
 	if err != nil {
-		r.log.Error("failed to write audit log",
-			"event_id", "AUDIT_WRITE_ERR",
-			"trace_id", e.TraceID,
-			"action", e.Action,
-			"target", e.Target,
-			"error", err.Error(),
-		)
+		r.writeError("stream", e, err)
+	}
+	if r.files == nil {
 		return
 	}
-	r.log.Info("audit",
-		"event_id", "AUDIT",
+	if err := r.files.Append(e, id); err != nil {
+		r.writeError("file", e, err)
+	}
+}
+
+func (r *Recorder) writeError(to string, e Entry, err error) {
+	r.log.Error("failed to write audit log",
+		"event_id", "AUDIT_WRITE_ERR",
+		"to", to,
 		"trace_id", e.TraceID,
-		"operator", e.Operator,
-		"mgmt_client", e.MgmtClient,
 		"action", e.Action,
 		"target", e.Target,
-		"stream_id", id,
+		"error", err.Error(),
 	)
 }
 

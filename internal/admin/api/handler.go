@@ -16,22 +16,28 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/oyaguma3/aka-radius/internal/admin/audit"
+	"github.com/oyaguma3/aka-radius/internal/audit"
 	"github.com/oyaguma3/aka-radius/internal/auth/source"
+	"github.com/oyaguma3/aka-radius/internal/clients"
 	"github.com/oyaguma3/aka-radius/internal/sessions"
 	"github.com/oyaguma3/aka-radius/internal/subscriber"
 	"github.com/oyaguma3/aka-radius/internal/usage"
 )
 
 // Version は管理API の版（/status の version）。
-const Version = "2.0.0-draft"
+const Version = "2.0.0"
 
 const maxBodyBytes = 256 << 10
 
-// Sources は取得先の登録簿（admin は鍵を読まずに、ID と証明書の期限だけを読む。段階 2-3 の G4）。
+// Sources は取得先の登録簿（admin は鍵を読まずに、ID と証明書の情報だけを読む。段階 2-3 の G4）。
 type Sources interface {
 	// Infos は取得先の情報と、登録簿を読んだ時刻を返す。
 	Infos() ([]source.Info, time.Time)
+}
+
+// SourceStatus は auth が報告した遮断器の状態を読む（段階 2-5 の K4）。
+type SourceStatus interface {
+	Read(ctx context.Context) (source.Status, bool, error)
 }
 
 // Handler は管理API のハンドラー。
@@ -39,13 +45,16 @@ type Handler struct {
 	Subs     *subscriber.Store
 	Sessions *sessions.Store
 	Usage    *usage.Store
+	Clients  *clients.Store
 	Sources  Sources
-	Audit    *audit.Recorder
-	Log      *slog.Logger
+	// SourceStatus は遮断器の状態の報告
+	SourceStatus SourceStatus
+	Audit        *audit.Recorder
+	Log          *slog.Logger
 	// MgmtClient はリクエストから管理クライアントの識別名を取り出す。
 	MgmtClient func(*http.Request) string
-	// AdminClients は管理クライアントの識別名の一覧（/status）。
-	AdminClients []string
+	// AdminClients は管理クライアントの識別名の一覧と、ピンのファイルを読んだ時刻を返す（/status）。
+	AdminClients func() ([]string, time.Time)
 
 	Build           string
 	NodeName        string
@@ -55,7 +64,6 @@ type Handler struct {
 }
 
 // Routes は管理API のルーティングを返す。
-// /clients・/sources は段階 2-5 で足す。
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/v2/status", h.getStatus)
@@ -71,6 +79,9 @@ func (h *Handler) Routes() http.Handler {
 
 	mux.HandleFunc("GET /admin/v2/sessions", h.listSessions)
 	mux.HandleFunc("GET /admin/v2/usage", h.listUsage)
+
+	mux.HandleFunc("GET /admin/v2/clients", h.listClients)
+	mux.HandleFunc("GET /admin/v2/sources", h.listSources)
 
 	mux.HandleFunc("GET /admin/v2/audit-logs", h.listAuditLogs)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,8 +2,10 @@ package source
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -46,13 +48,25 @@ type entryFormat struct {
 	Timeout string `json:"timeout"`
 }
 
-// Info は登録簿の 1 件の情報（ログと管理API 用。鍵のパスは持たない）。
+// Info は登録簿の 1 件の情報（ログと管理API 用。鍵とファイルのパスは持たない）。
 type Info struct {
 	ID       string
 	Name     string
 	BaseURL  string
 	Timeout  time.Duration
 	NotAfter time.Time // クライアント証明書の期限
+	// ClientCertSubject・ClientCertFingerprint はクライアント証明書の主体名と SHA-256 のフィンガープリント
+	// （取得先の側の登録（aka-vecgen の client add）と突き合わせる。読めなければ空）
+	ClientCertSubject     string
+	ClientCertFingerprint string
+	// ServerCAs は取得先のサーバーの CA（読めなければ空）
+	ServerCAs []CertInfo
+}
+
+// CertInfo は証明書の主体名と期限。
+type CertInfo struct {
+	Subject  string
+	NotAfter time.Time
 }
 
 // entry は読み込んだ 1 件。
@@ -72,17 +86,42 @@ type Registry struct {
 	path string
 	cur  atomic.Pointer[set]
 	mu   sync.Mutex // Reload を 1 つずつにする
+	// changed は、遮断器の状態が変わったときと読み直したときに知らせる（Changed）。
+	changed chan struct{}
 }
 
 // LoadRegistry は path の登録簿を読む。読めない・形が違うときはエラーを返す。
 func LoadRegistry(path string) (*Registry, error) {
-	s, err := readSet(path)
+	r := &Registry{path: path, changed: make(chan struct{}, 1)}
+	s, err := readSet(path, r.notify)
 	if err != nil {
 		return nil, err
 	}
-	r := &Registry{path: path}
 	r.cur.Store(s)
 	return r, nil
+}
+
+// notify は Changed の受け手に知らせる（待っていなければ 1 つだけためる）。
+func (r *Registry) notify() {
+	select {
+	case r.changed <- struct{}{}:
+	default:
+	}
+}
+
+// Changed は、遮断器の状態が変わったときと登録簿を読み直したときに値が届くチャネルを返す（状態の報告。§11.2）。
+func (r *Registry) Changed() <-chan struct{} {
+	return r.changed
+}
+
+// Breakers は取得先ごとの遮断器の状態を返す。
+func (r *Registry) Breakers() map[string]BreakerStatus {
+	s := r.cur.Load()
+	out := make(map[string]BreakerStatus, len(s.order))
+	for _, id := range s.order {
+		out[id] = s.byID[id].client.Breaker()
+	}
+	return out
 }
 
 // Reload は登録簿を読み直す。読めない・形が違うときは前の登録簿のまま続け、エラーを返す。
@@ -92,7 +131,7 @@ func LoadRegistry(path string) (*Registry, error) {
 func (r *Registry) Reload(check func(removed []string) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s, err := readSet(r.path)
+	s, err := readSet(r.path, r.notify)
 	if err != nil {
 		return err
 	}
@@ -115,6 +154,7 @@ func (r *Registry) Reload(check func(removed []string) error) error {
 	for _, e := range old.byID {
 		e.client.close()
 	}
+	r.notify()
 	return nil
 }
 
@@ -139,7 +179,8 @@ func (r *Registry) List() []Info {
 
 // readSet はファイルを読み、各取得先の証明書を読み込んでクライアントを作る。
 // 証明書と鍵のパスが相対なら、登録簿のファイルのディレクトリから見る。
-func readSet(path string) (*set, error) {
+// notify は遮断器の状態が変わったときに呼ぶ。
+func readSet(path string, notify func()) (*set, error) {
 	f, err := readFile(path)
 	if err != nil {
 		return nil, err
@@ -148,7 +189,7 @@ func readSet(path string) (*set, error) {
 	s := &set{byID: map[string]*entry{}}
 	var errs []error
 	for i, ef := range f.Sources {
-		e, err := buildEntry(ef, dir)
+		e, err := buildEntry(ef, dir, notify)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("sources[%d] (%q): %w", i, ef.ID, err))
 			continue
@@ -184,7 +225,7 @@ func readFile(path string) (*fileFormat, error) {
 	return &f, nil
 }
 
-func buildEntry(ef entryFormat, dir string) (*entry, error) {
+func buildEntry(ef entryFormat, dir string, notify func()) (*entry, error) {
 	info, err := checkEntry(ef)
 	if err != nil {
 		return nil, err
@@ -197,12 +238,10 @@ func buildEntry(ef entryFormat, dir string) (*entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
-		info.NotAfter = leaf.NotAfter
-	}
+	describeCerts(&info, resolve(dir, ef.ClientCertFile), resolve(dir, ef.ServerCAFile))
 	return &entry{
 		info:   info,
-		client: newClient(clientOptions{ID: ef.ID, BaseURL: info.BaseURL, ClientCert: cert, ServerCAs: cas, Timeout: info.Timeout}),
+		client: newClient(clientOptions{ID: ef.ID, BaseURL: info.BaseURL, ClientCert: cert, ServerCAs: cas, Timeout: info.Timeout, OnChange: notify}),
 	}, nil
 }
 
@@ -233,7 +272,7 @@ func checkEntry(ef entryFormat) (Info, error) {
 
 // ReadInfos は登録簿のファイルを読み、取得先の情報をファイルの順に返す。
 // admin（管理API）が加入者の取得先の ID を確かめるために使う（段階 2-3 の G4）。鍵のファイルは読まず、
-// クライアント証明書は期限を知るためだけに読む（読めなければ期限は空のまま）。形の誤りは LoadRegistry と同じく誤りにする。
+// 証明書は主体名・期限・フィンガープリントを知るためだけに読む（読めなければ空のまま）。形の誤りは LoadRegistry と同じく誤りにする。
 func ReadInfos(path string) ([]Info, error) {
 	f, err := readFile(path)
 	if err != nil {
@@ -254,7 +293,7 @@ func ReadInfos(path string) ([]Info, error) {
 			continue
 		}
 		seen[info.ID] = true
-		info.NotAfter = certNotAfter(resolve(dir, ef.ClientCertFile))
+		describeCerts(&info, resolve(dir, ef.ClientCertFile), resolve(dir, ef.ServerCAFile))
 		out = append(out, info)
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -263,23 +302,40 @@ func ReadInfos(path string) ([]Info, error) {
 	return out, nil
 }
 
-// certNotAfter は PEM のファイルの最初の証明書の期限を返す（読めなければ空）。
-func certNotAfter(path string) time.Time {
+// describeCerts は、クライアント証明書（最初の証明書）とサーバーの CA の主体名・期限・フィンガープリントを info に入れる。
+// 読めないファイルの項目は空のまま（admin は形の誤りだけを誤りにし、証明書が読めるかは sources check で確かめる）。
+func describeCerts(info *Info, clientCertPath, serverCAPath string) {
+	if certs := readCerts(clientCertPath); len(certs) > 0 {
+		sum := sha256.Sum256(certs[0].Raw)
+		info.NotAfter = certs[0].NotAfter
+		info.ClientCertSubject = certs[0].Subject.String()
+		info.ClientCertFingerprint = hex.EncodeToString(sum[:])
+	}
+	for _, c := range readCerts(serverCAPath) {
+		info.ServerCAs = append(info.ServerCAs, CertInfo{Subject: c.Subject.String(), NotAfter: c.NotAfter})
+	}
+}
+
+// readCerts は PEM のファイルの証明書を読む（読めなければ空）。
+func readCerts(path string) []*x509.Certificate {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return time.Time{}
+		return nil
 	}
+	var out []*x509.Certificate
 	for {
 		var block *pem.Block
 		if block, data = pem.Decode(data); block == nil {
-			return time.Time{}
+			return out
 		}
-		if block.Type == "CERTIFICATE" {
-			if c, err := x509.ParseCertificate(block.Bytes); err == nil {
-				return c.NotAfter
-			}
-			return time.Time{}
+		if block.Type != "CERTIFICATE" {
+			continue
 		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return out
+		}
+		out = append(out, c)
 	}
 }
 

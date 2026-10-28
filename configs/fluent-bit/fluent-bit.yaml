@@ -46,3 +46,16 @@ pipeline:
       path: /output_logs
       file: valkey.log
       format: plain
+
+    # データ面の aka-vecgen とその Valkey（aka-vecgen の compose.fluent-bit.yaml を重ねたとき。MVP の設計概要 §13）
+    - name: file
+      match: app.vecgen
+      path: /output_logs
+      file: vecgen.log
+      format: plain
+
+    - name: file
+      match: app.vecgen-valkey
+      path: /output_logs
+      file: vecgen-valkey.log
+      format: plain

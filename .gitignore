@@ -30,6 +30,10 @@ deployments/logs_on_host/*.log
 deployments/certs/*
 !deployments/certs/.gitkeep
 
+# 管理クライアントのピンのファイルと、監査ログの日ごとのファイル
+deployments/secrets/
+deployments/audit/
+
 # 取得先の登録簿と、取得先ごとの証明書・秘密鍵（例のファイルだけ管理する）
 deployments/sources/*
 !deployments/sources/sources.example.json

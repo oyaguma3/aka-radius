@@ -62,7 +62,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # auth・acct・admin・gateway は同じイメージ（サブコマンドで切り替える）
+      # auth・acct・admin は同じイメージ（サブコマンドで切り替える）
       - name: イメージのビルド
         run: |
           docker build -t aka-radius:ci .
@@ -78,8 +78,8 @@ jobs:
         run: |
           cp .env.example .env
           docker compose -f docker-compose.yml config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile admin config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile admin config --services
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml config --services
           # VALKEY_PASSWORD が空なら、compose が断る。
           sed -i 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=|' .env
           ! docker compose -f docker-compose.yml config -q 2>/dev/null

@@ -6,37 +6,43 @@ import (
 	"testing"
 )
 
-func TestLookup(t *testing.T) {
-	for _, name := range []string{"auth", "acct", "admin"} {
-		var buf bytes.Buffer
-		if run, ok := lookup([]string{name}, &buf); !ok || run == nil {
-			t.Errorf("lookup(%q) = %v, want the entry point", name, ok)
-		}
-		if buf.Len() != 0 {
-			t.Errorf("lookup(%q) wrote %q", name, buf.String())
-		}
-	}
-}
-
-func TestLookup_Errors(t *testing.T) {
+func TestRun_Errors(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
+		code int
 		want string
 	}{
-		{"引数なし", nil, "使い方"},
-		{"引数が 2 つ", []string{"auth", "acct"}, "使い方"},
-		{"不明なサブコマンド", []string{"gateway"}, `不明なサブコマンド: "gateway"`},
+		{"引数なし", nil, 2, "使い方"},
+		{"サーバーに引数", []string{"auth", "acct"}, 2, "引数をとりません"},
+		{"不明なサブコマンド", []string{"gateway"}, 2, `不明なサブコマンド: "gateway"`},
+		{"コマンドの誤り", []string{"client"}, 1, "usage: aka-radius client"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if _, ok := lookup(tt.args, &buf); ok {
-				t.Fatal("lookup returned ok")
+			if code := run(tt.args, &buf); code != tt.code {
+				t.Errorf("run(%v) = %d, want %d", tt.args, code, tt.code)
 			}
 			if !strings.Contains(buf.String(), tt.want) {
 				t.Errorf("output %q does not contain %q", buf.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestSubcommandNames(t *testing.T) {
+	for _, name := range []string{"auth", "acct", "admin"} {
+		if servers[name] == nil {
+			t.Errorf("server %q is missing", name)
+		}
+	}
+	for _, name := range []string{"client", "sources", "admin-cert", "fingerprint", "healthcheck"} {
+		if commands[name] == nil {
+			t.Errorf("command %q is missing", name)
+		}
+		if !strings.Contains(usage, name) {
+			t.Errorf("usage does not mention %q", name)
+		}
 	}
 }

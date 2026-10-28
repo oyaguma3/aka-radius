@@ -55,7 +55,8 @@ services:
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "aka-radius"]
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -86,7 +87,8 @@ services:
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "aka-radius"]
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -104,51 +106,54 @@ services:
   # Management Layer
   # ==========================================================================
   # 管理API 2.0.0（/admin/v2。MVP の設計概要 §11）。aka-provisioner から加入者（状態・取得先・認可ポリシー）を
-  # 操作する REST API（HTTPS + mTLS）。証明書の準備が要るため
-  # profile に入れており、既定の `docker compose up` では起動しない。
-  #   docker compose --profile admin up -d
+  # 操作する REST API（HTTPS + mTLS）。起動の前に、サーバー証明書（certs/admin/）と管理クライアントのピンのファイル
+  # （secrets/admin-clients）を用意する（README の「起動」）。
+  # 運用のコマンド（client・admin-cert など）もこのコンテナで使う: docker compose exec admin aka-radius client list
   # 同じホストの呼び出し側（別の compose）は、ホストの 127.0.0.1 に届かないため、
-  # 共有ネットワーク（既定名 eapaka-prov）に参加して https://provisioning-api:9444 で接続する
-  # （共有ネットワークの名前と別名は段階 2-5 で決め直す）。
+  # 共有ネットワーク（既定名 aka-radius-admin）に参加して https://aka-radius-admin:9444 で接続する。
   admin:
     <<: *aka-radius
     command: ["admin"]
-    profiles: ["admin"]
     ports:
       # 既定はループバックだけ。別ノードから使う場合は .env の RADIUS_ADMIN_BIND を変える
       - "${RADIUS_ADMIN_BIND:-127.0.0.1}:9444:9444/tcp"
+    secrets:
+      - admin-clients
     environment:
       <<: *radius-common-env
       RADIUS_ADMIN_TLS_CERT: /certs/server.pem
       RADIUS_ADMIN_TLS_KEY: /certs/server.key
-      # 管理クライアントの「識別名=フィンガープリント」。空なら起動しない
-      RADIUS_ADMIN_CLIENTS: ${RADIUS_ADMIN_CLIENTS:-}
+      # 管理クライアントのピン（1 行に「識別名=フィンガープリント」）。SIGHUP で読み直す
+      RADIUS_ADMIN_CLIENTS_FILE: /run/secrets/admin-clients
       RADIUS_ADMIN_NODE_NAME: ${RADIUS_ADMIN_NODE_NAME:-}
-      # GET /audit-logs で参照できる監査ログ（Valkey の Stream audit）の件数の上限
-      RADIUS_ADMIN_AUDIT_MAX: ${RADIUS_ADMIN_AUDIT_MAX:-10000}
-      # 取得先の登録簿（auth と同じファイル）。加入者の sourceId を確かめ、/status に出す。鍵は読まない。
+      # 監査ログ: Valkey の Stream（audit。GET /audit-logs）の件数の上限と、日ごとのファイル（audit-YYYYMMDD.jsonl）
+      RADIUS_AUDIT_MAX_LEN: ${RADIUS_AUDIT_MAX_LEN:-10000}
+      RADIUS_AUDIT_DIR: /var/lib/aka-radius/audit
+      RADIUS_AUDIT_RETENTION_DAYS: ${RADIUS_AUDIT_RETENTION_DAYS:-14}
+      # 取得先の登録簿（auth と同じファイル）。加入者の sourceId を確かめ、/status・/sources に出す。鍵は読まない。
       # 登録簿を直したら docker compose kill -s HUP auth admin で両方に読み直させる
       RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
       # /status に出すテナントの刻印の Vendor-Id と Vendor-Type（auth と同じ値にする）
       RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
       RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
     volumes:
-      # サーバー証明書（server.pem / server.key）。SAN に DNS:provisioning-api を入れる
-      - ./certs/provisioning:/certs:ro
+      # サーバー証明書（server.pem / server.key）。SAN に DNS:aka-radius-admin を入れる。SIGHUP で読み直す
+      - ./certs/admin:/certs:ro
       - ./sources:/etc/aka-radius/sources:ro
+      # 監査ログの日ごとのファイル。監視用の PC が取りに行く。コンテナは UID 65532 で動くので、この UID で書けるようにする
+      - ./audit:/var/lib/aka-radius/audit
     networks:
       default:
-      # 同じホストの呼び出し側用の共有ネットワーク（admin だけを参加させる）。
-      # 呼び出し側の設定と証明書の SAN を変えずに済むよう、もとの名前 provisioning-api を別名にする
-      provisioning-shared:
+      # 同じホストの呼び出し側用の共有ネットワーク（admin だけを参加させる）
+      admin-shared:
         aliases:
-          - provisioning-api
+          - aka-radius-admin
     depends_on:
       valkey:
         condition: service_healthy
     healthcheck:
-      # /status は mTLS が要るため、プロセスの確認にする
-      test: ["CMD", "pgrep", "-x", "aka-radius"]
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -220,9 +225,14 @@ services:
 volumes:
   valkey_data:
 
+secrets:
+  # 管理クライアントのピンのファイル（README の「管理クライアント」）
+  admin-clients:
+    file: ./secrets/admin-clients
+
 networks:
-  # 同じホストの呼び出し側と admin の共有ネットワーク（D-13 §2.2）。
+  # 同じホストの呼び出し側（aka-provisioner）と admin の共有ネットワーク。
   # 本 compose が作り、呼び出し側は外部ネットワーク（external）として参加する。
-  # admin を起動したとき（profile admin）だけ作られる。名前は段階 2-5 で決め直す。
-  provisioning-shared:
-    name: ${PROVISIONING_SHARED_NETWORK:-eapaka-prov}
+  # 本番では aka-provisioner は別のノードから WireGuard でつなぐので、同じホストでの試しと CI のためのもの。
+  admin-shared:
+    name: ${RADIUS_ADMIN_SHARED_NETWORK:-aka-radius-admin}

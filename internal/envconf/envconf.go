@@ -103,6 +103,8 @@ type Common struct {
 	LogLevel string
 	// LogMaskIMSI はログの IMSI をマスクするか（既定 false。MVP の決定事項 26）。
 	LogMaskIMSI bool
+	// HealthAddr は healthcheck の口（RADIUS_HEALTH_ADDR。既定 127.0.0.1:9090）。
+	HealthAddr string
 }
 
 // LoadCommon は共通の設定を読む。Valkey のパスワードは必須（Valkey は requirepass で動かす）。
@@ -120,6 +122,9 @@ func LoadCommon() (Common, error) {
 	if c.LogMaskIMSI, err = Bool("RADIUS_LOG_MASK_IMSI", false); err != nil {
 		errs = append(errs, err)
 	}
+	if c.HealthAddr, err = HealthAddr(); err != nil {
+		errs = append(errs, err)
+	}
 	if err := errors.Join(errs...); err != nil {
 		return Common{}, err
 	}
@@ -129,4 +134,45 @@ func LoadCommon() (Common, error) {
 // ValkeyAddr は Valkey の接続先を "host:port" の形で返す。
 func (c Common) ValkeyAddr() string {
 	return net.JoinHostPort(c.ValkeyHost, c.ValkeyPort)
+}
+
+// DefaultHealthAddr は healthcheck の口の既定（各コンテナのループバック。MVP の設計概要 §5）。
+// コンテナごとにネットワークの名前空間が分かれているので、auth・acct・admin で同じポートを使う。
+const DefaultHealthAddr = "127.0.0.1:9090"
+
+// HealthAddr は healthcheck の口の待ち受けアドレス（RADIUS_HEALTH_ADDR）を返す。
+// サーバーとコマンド healthcheck の両方が読む（コマンドは Valkey のパスワードなしで動かせるように、共通の設定とは分ける）。
+func HealthAddr() (string, error) {
+	addr := String("RADIUS_HEALTH_ADDR", DefaultHealthAddr)
+	if _, port, err := net.SplitHostPort(addr); err != nil || port == "" {
+		return "", fmt.Errorf("RADIUS_HEALTH_ADDR: must be host:port (got %q)", addr)
+	}
+	return addr, nil
+}
+
+// Audit は監査ログの設定（admin とコマンドで共通。MVP の設計概要 §13）。
+type Audit struct {
+	// Dir は日ごとのファイル（audit-YYYYMMDD.jsonl）を書くディレクトリ（RADIUS_AUDIT_DIR）。
+	Dir string
+	// RetentionDays はファイルを持つ日数（RADIUS_AUDIT_RETENTION_DAYS。既定 14）。
+	RetentionDays int
+	// MaxLen は Valkey の Stream（audit）に持つ件数の上限（RADIUS_AUDIT_MAX_LEN。既定 10000）。
+	MaxLen int64
+}
+
+// LoadAudit は監査ログの設定を読む。
+func LoadAudit() (Audit, error) {
+	a := Audit{Dir: String("RADIUS_AUDIT_DIR", "/var/lib/aka-radius/audit")}
+	days, err := PositiveInt("RADIUS_AUDIT_RETENTION_DAYS", 14)
+	if err != nil {
+		return Audit{}, err
+	}
+	if days > 3650 {
+		return Audit{}, errors.New("RADIUS_AUDIT_RETENTION_DAYS: must be at most 3650")
+	}
+	a.RetentionDays = int(days)
+	if a.MaxLen, err = PositiveInt("RADIUS_AUDIT_MAX_LEN", 10000); err != nil {
+		return Audit{}, err
+	}
+	return a, nil
 }
