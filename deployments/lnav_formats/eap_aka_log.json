@@ -1,8 +1,8 @@
 {
     "$schema": "https://lnav.org/schemas/format-v1.schema.json",
     "aka_radius_log": {
-        "title": "EAP-AKA RADIUS System Logs",
-        "description": "Structured JSON logs from Go RADIUS PoC (slog JSONHandler)",
+        "title": "aka-radius logs",
+        "description": "Structured JSON logs of aka-radius auth, acct and admin (slog JSONHandler)",
         "url": "http://localhost",
         "json": true,
         "file-pattern": "(?:auth|acct|admin)\\.log",
@@ -10,50 +10,142 @@
         "level-field": "level",
         "body-field": "msg",
         "value": {
-            "app": { "kind": "string", "identifier": true },
-            "imsi": { "kind": "string", "identifier": true },
-            "trace_id": { "kind": "string", "identifier": true },
-            "event_id": { "kind": "string", "identifier": true },
-            "backend_id": { "kind": "string", "identifier": true },
-            "plmn": { "kind": "string", "identifier": true },
-            "cause": { "kind": "string", "identifier": true },
-            "nas_identifier": { "kind": "string", "identifier": true },
-            "mgmt_client": { "kind": "string", "identifier": true },
-            "admin_user": { "kind": "string", "identifier": true },
-            "operation": { "kind": "string", "identifier": true },
-            "target_type": { "kind": "string", "identifier": true },
-            "latency_ms": { "kind": "integer" },
-            "input_octets": { "kind": "integer" },
-            "output_octets": { "kind": "integer" },
-            "code": { "kind": "integer" },
-            "subtype": { "kind": "integer" },
-            "eap_type": { "kind": "integer" },
-            "acct_status_type": { "kind": "integer" },
-            "session_time": { "kind": "integer" },
-            "failure_count": { "kind": "integer" },
-            "resync_count": { "kind": "integer" },
-            "attempt": { "kind": "integer" },
-            "http_status": { "kind": "integer" }
+            "app": {
+                "kind": "string",
+                "identifier": true
+            },
+            "imsi": {
+                "kind": "string",
+                "identifier": true
+            },
+            "trace_id": {
+                "kind": "string",
+                "identifier": true
+            },
+            "event_id": {
+                "kind": "string",
+                "identifier": true
+            },
+            "source_id": {
+                "kind": "string",
+                "identifier": true
+            },
+            "tenant_id": {
+                "kind": "integer",
+                "identifier": true
+            },
+            "src_ip": {
+                "kind": "string",
+                "identifier": true
+            },
+            "client_ip": {
+                "kind": "string",
+                "identifier": true
+            },
+            "session_id": {
+                "kind": "string",
+                "identifier": true
+            },
+            "cause": {
+                "kind": "string",
+                "identifier": true
+            },
+            "nas_identifier": {
+                "kind": "string",
+                "identifier": true
+            },
+            "mgmt_client": {
+                "kind": "string",
+                "identifier": true
+            },
+            "operator": {
+                "kind": "string",
+                "identifier": true
+            },
+            "action": {
+                "kind": "string",
+                "identifier": true
+            },
+            "target": {
+                "kind": "string",
+                "identifier": true
+            },
+            "latency_ms": {
+                "kind": "integer"
+            },
+            "input_octets": {
+                "kind": "integer"
+            },
+            "output_octets": {
+                "kind": "integer"
+            },
+            "code": {
+                "kind": "integer"
+            },
+            "subtype": {
+                "kind": "integer"
+            },
+            "eap_type": {
+                "kind": "integer"
+            },
+            "acct_status_type": {
+                "kind": "integer"
+            },
+            "session_time": {
+                "kind": "integer"
+            },
+            "failure_count": {
+                "kind": "integer"
+            },
+            "resync_count": {
+                "kind": "integer"
+            },
+            "attempt": {
+                "kind": "integer"
+            },
+            "http_status": {
+                "kind": "integer"
+            }
         },
         "sample": [
             {
-                "line": "{\"time\":\"2026-02-28T23:00:02.356730959+09:00\",\"level\":\"INFO\",\"msg\":\"starting vector-api\",\"app\":\"vector-api\",\"listen_addr\":\":8080\",\"log_level\":\"INFO\",\"test_mode\":false}"
+                "line": "{\"time\": \"2026-10-28T22:53:41.012345678+09:00\", \"level\": \"INFO\", \"msg\": \"auth起動開始\", \"app\": \"auth\", \"build\": \"dev\", \"listen_addr\": \":1812\"}"
             },
             {
-                "line": "{\"time\":\"2026-02-28T23:00:07.393000000+09:00\",\"level\":\"INFO\",\"msg\":\"request completed\",\"app\":\"vector-api\",\"trace_id\":\"no-trace-id\",\"method\":\"GET\",\"path\":\"/health\",\"http_status\":200,\"latency_ms\":0}"
-            },
-            {
-                "line": "{\"time\":\"2026-02-28T23:00:08.845000000+09:00\",\"level\":\"WARN\",\"msg\":\"ポリシー拒否\",\"app\":\"auth-server\",\"event_id\":\"AUTH_POLICY_DENIED\",\"trace_id\":\"abc-123\",\"imsi\":\"440101********0\",\"reason\":\"no matching rule and default is deny\"}",
+                "line": "{\"time\": \"2026-10-28T22:53:42.512345678+09:00\", \"level\": \"WARN\", \"msg\": \"刻印がない\", \"app\": \"auth\", \"event_id\": \"AUTH_STAMP_MISSING\", \"trace_id\": \"abc-123\", \"imsi\": \"440100123456789\", \"src_ip\": \"172.31.250.100\", \"nas_identifier\": \"ap-01\"}",
                 "level": "warning"
+            },
+            {
+                "line": "{\"time\": \"2026-10-28T22:53:43.012345678+09:00\", \"level\": \"INFO\", \"msg\": \"audit\", \"app\": \"admin\", \"event_id\": \"AUDIT\", \"trace_id\": \"t-1\", \"operator\": \"alice\", \"mgmt_client\": \"provisioner\", \"action\": \"subscriber.create\", \"target\": \"440100123456789\"}"
             }
         ],
         "line-format": [
-            { "field": "time" }, " ",
-            { "field": "level" }, " ",
-            { "field": "app" }, " ",
-            { "field": "event_id", "default-value": "-" }, " ",
-            "[", { "field": "imsi", "default-value": "-" }, "] ",
-            { "field": "msg" }
+            {
+                "field": "time"
+            },
+            " ",
+            {
+                "field": "level"
+            },
+            " ",
+            {
+                "field": "app"
+            },
+            " ",
+            {
+                "field": "event_id",
+                "default-value": "-"
+            },
+            " ",
+            "[",
+            {
+                "field": "imsi",
+                "default-value": "-"
+            },
+            "] ",
+            {
+                "field": "msg"
+            }
         ]
     }
 }

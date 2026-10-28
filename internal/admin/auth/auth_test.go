@@ -167,7 +167,7 @@ func TestVerifyConnection(t *testing.T) {
 	if err := v.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{other.Leaf}}); err == nil {
 		t.Error("unregistered certificate accepted")
 	}
-	if !strings.Contains(logBuf.String(), Fingerprint(other.Leaf)) || !strings.Contains(logBuf.String(), "PROV_CLIENT_REJECTED") {
+	if !strings.Contains(logBuf.String(), Fingerprint(other.Leaf)) || !strings.Contains(logBuf.String(), "ADMIN_CLIENT_REJECTED") {
 		t.Errorf("rejection log = %s", logBuf.String())
 	}
 

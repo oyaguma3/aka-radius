@@ -65,6 +65,17 @@ func openValkey(operator string) (*redis.Client, cliAudit, error) {
 	return rdb, cliAudit{rec: rec, operator: operator}, nil
 }
 
+// fileOnlyAudit は、Valkey に届かないときに日ごとのファイルにだけ書く監査ログの書き手を作る。
+func fileOnlyAudit(operator string) (cliAudit, error) {
+	auditCfg, err := envconf.LoadAudit()
+	if err != nil {
+		return cliAudit{}, err
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	rec := audit.NewRecorder(nil, auditCfg.MaxLen, audit.NewFiles(auditCfg.Dir, auditCfg.RetentionDays), log)
+	return cliAudit{rec: rec, operator: operator}, nil
+}
+
 type change struct {
 	From any `json:"from"`
 	To   any `json:"to"`

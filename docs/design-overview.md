@@ -302,7 +302,7 @@
 - compose に auth・acct・admin・Valkey・Fluent Bit を置く。データ面のノードで aka-vecgen と並べる。
 - 1812/udp・1813/udp と 9444/tcp は、サービス用の WireGuard のアドレスにだけ結び付け、nftables の `DOCKER-USER` で送信元を絞る（概要 §5.3）。
 - auth は、aka-vecgen が作る共有の Docker のネットワークに参加する（本PoC の `aka-av` を vector-gateway から auth に移す）。
-- 取得先のクライアント証明書と鍵、管理クライアントのピンのファイル、取得先の登録簿は Docker の secrets で渡す。読み直しは `docker compose kill -s HUP auth admin`。
+- 取得先の登録簿と、取得先ごとのクライアント証明書・鍵・サーバーの CA は、ディレクトリ `deployments/sources/` をマウントして渡す（段階 2-2 の B2）。管理クライアントのピンのファイルは Docker の secrets で、管理API のサーバー証明書はディレクトリ `deployments/certs/admin/` で渡す（段階 2-5）。読み直しは `docker compose kill -s HUP auth admin`。
 
 ## 15. 試験
 
