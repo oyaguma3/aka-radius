@@ -393,6 +393,7 @@
 - K13: 共有のネットワークは `aka-radius-admin`（`RADIUS_ADMIN_SHARED_NETWORK`）、admin の別名も `aka-radius-admin`。証明書は `deployments/certs/admin/`。aka-provisioner の重ね合わせの付け替えは段階 3-1、D-文書の直しは 2-6。
 - K14: Fluent Bit の出力に `app.vecgen`（`vecgen.log`）と `app.vecgen-valkey`（`vecgen-valkey.log`）を足した。aka-vecgen 側は `compose.fluent-bit.yaml`。
 - K15: OpenAPI を 2.0.0 にした。
+- K16（2-5 のマージの後の develop の CI で見つけた）: 2-3 の重複応答のキャッシュ（`radiussrv.Guard`）は、応答を送ってからキャッシュに入れていたので、その間に届いた再送を処理中として捨てていた（acct の結合試験がたまに落ちた）。応答はキャッシュに入れてから送るように直した。
 
 ### 17.2 D-文書の扱い（S4）
 
