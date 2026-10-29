@@ -1,6 +1,6 @@
 package eap
 
-// EAPState はEAP認証の状態を表す型（D-03セクション2.2準拠）
+// EAPState はEAP認証の状態を表す型（D-09 §6.5）
 type EAPState string
 
 // EAP認証状態の定数（8状態）
@@ -15,7 +15,7 @@ const (
 	StateFailure          EAPState = "FAILURE"           // 認証失敗（終了状態）
 )
 
-// StateEvent はEAP認証の状態遷移イベントを表す型（D-03セクション2.4準拠）
+// StateEvent はEAP認証の状態遷移イベントを表す型（D-09 §6.5）
 type StateEvent string
 
 // EAP認証イベントの定数（16イベント）
@@ -38,7 +38,7 @@ const (
 	EventResyncError         StateEvent = "RESYNC_ERROR"         // 再同期Vectorエラー
 )
 
-// transitionTable はEAP状態遷移テーブル（D-03セクション2.3準拠）
+// transitionTable はEAP状態遷移テーブル（D-09 §6.5）
 var transitionTable = map[EAPState]map[StateEvent]EAPState{
 	StateNew: {
 		EventPermanentIdentity:   StateIdentityReceived,

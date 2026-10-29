@@ -45,7 +45,7 @@ type RejectParams struct {
 }
 
 // BuildAccessAccept はAccess-Acceptパケットを構築する。
-// D-09 5.7: 認証成功時の応答パケットを生成する。
+// D-09 §5.6: 認証成功時の応答パケットを生成する。
 func BuildAccessAccept(request *radius.Packet, secret []byte, params *AcceptParams) *radius.Packet {
 	resp := request.Response(radius.CodeAccessAccept)
 
@@ -91,7 +91,7 @@ func BuildAccessAccept(request *radius.Packet, secret []byte, params *AcceptPara
 }
 
 // BuildAccessChallenge はAccess-Challengeパケットを構築する。
-// D-09 5.7: EAP認証継続時の応答パケットを生成する。
+// D-09 §5.6: EAP認証継続時の応答パケットを生成する。
 func BuildAccessChallenge(request *radius.Packet, secret []byte, params *ChallengeParams) *radius.Packet {
 	resp := request.Response(radius.CodeAccessChallenge)
 
@@ -113,7 +113,7 @@ func BuildAccessChallenge(request *radius.Packet, secret []byte, params *Challen
 }
 
 // BuildAccessReject はAccess-Rejectパケットを構築する。
-// D-09 5.7: 認証失敗時の応答パケットを生成する。
+// D-09 §5.6: 認証失敗時の応答パケットを生成する。
 func BuildAccessReject(request *radius.Packet, secret []byte, params *RejectParams) *radius.Packet {
 	resp := request.Response(radius.CodeAccessReject)
 

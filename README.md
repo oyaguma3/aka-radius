@@ -5,7 +5,7 @@
 
 このリポジトリは、VPS に分けて置いて顧客を収容する **MVP セット**（[aka-mvpset](https://github.com/oyaguma3/aka-mvpset)）の RADIUS サーバーのノードです。PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset) の `pocset-v1.0.1`）の [eapaka-radius-server-poc](https://github.com/oyaguma3/eapaka-radius-server-poc) の履歴を引き継いで作りました（もとのコミット `main` の `1f8aad1`、`develop` の `86e05a9`）。
 
-MVP のための改修は、[設計概要](docs/design-overview.md)（決定事項と段階の記録）のとおりに MVP セットの段階 2 で行いました（2-1〜2-6）。運用は[運用ガイド](docs/operation-guide.md)、細かい仕様は D-文書（[ドキュメント一覧](docs/EAP-AKA_RADIUS_PoC環境_ドキュメント一覧_r69.md)）、管理API は [OpenAPI](docs/openapi/admin-api.yaml) にあります。
+MVP のための改修は、[設計概要](docs/design-overview.md)（決定事項と段階の記録）のとおりに MVP セットの段階 2 で行いました（2-1〜2-6）。運用は[運用ガイド](docs/operation-guide.md)、細かい仕様は D-文書（[ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r70.md)）、管理API は [OpenAPI](docs/openapi/admin-api.yaml) にあります。
 
 ## 概要
 
@@ -231,7 +231,7 @@ aka-provisioner から加入者を操作する API です（設計概要 §11）
 
 各コンテナの healthcheck は、ループバックの口（`127.0.0.1:9090`。Valkey に届くか）を `aka-radius healthcheck` で確かめます。
 
-API 仕様は [docs/openapi/admin-api.yaml](docs/openapi/admin-api.yaml)（2.0.0、`/admin/v2`）を参照してください。本PoC の Provisioning API（`/admin/v1`、`docs/openapi/provisioning-api.yaml`、D-13）は段階 2-3 でなくしました。
+API 仕様は [docs/openapi/admin-api.yaml](docs/openapi/admin-api.yaml)（2.0.0、`/admin/v2`）を参照してください。本PoC の Provisioning API（`/admin/v1`）は段階 2-3 でなくしました（OpenAPI は段階 2-6 で廃止しました。管理API の方針は D-13 管理API 詳細設計書）。
 
 ## テスト実行
 
@@ -255,7 +255,7 @@ go test ./internal/auth/...
 |---|---|
 | [運用ガイド](docs/operation-guide.md) | 導入、aka-vecgen とつなぐ、エッジ、管理API、加入者と認可、証明書、公開範囲、ログと監査ログ、バックアップ、障害時の確かめ |
 | [設計概要](docs/design-overview.md) | MVP の決定事項と、段階 2 の各手順で決めたことの記録 |
-| [ドキュメント一覧](docs/EAP-AKA_RADIUS_PoC環境_ドキュメント一覧_r69.md) | D-文書（設計・ログ・エラー処理・インフラ・各サーバーの詳細設計など）と、廃止した文書 |
+| [ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r70.md) | D-文書（設計・ログ・エラー処理・インフラ・各サーバーの詳細設計など）と、廃止した文書 |
 | [管理API（OpenAPI）](docs/openapi/admin-api.yaml) | 管理API 2.0.0 |
 
 ## ライセンス

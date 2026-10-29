@@ -9,7 +9,7 @@ import (
 )
 
 // VerifyMessageAuthenticator はMessage-Authenticator属性を検証する。
-// D-09 5.5/5.11: Request Authenticatorを使用してHMAC-MD5を計算し、
+// D-09 §5.3: Request Authenticatorを使用してHMAC-MD5を計算し、
 // パケット内のMessage-Authenticator値と比較する。
 func VerifyMessageAuthenticator(packet *radius.Packet, secret []byte) bool {
 	// 1. Message-Authenticator属性値を取得

@@ -107,7 +107,7 @@ func TestHandleStatusServer_NoMessageAuth(t *testing.T) {
 }
 
 func TestHandleStatusServer_AccountingResponse(t *testing.T) {
-	// Accounting の口は Accounting-Response を返す（D-10 4.7）。
+	// Accounting の口は Accounting-Response を返す（D-10 §4.3）。
 	secret := []byte("acct-secret")
 	req := radius.New(radius.CodeStatusServer, secret)
 	setValidMessageAuthenticator(req, secret)

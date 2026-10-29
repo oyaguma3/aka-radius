@@ -7,8 +7,8 @@ import (
 )
 
 // HandleStatusServer はStatus-Server(Code=12)を処理し、respCode の応答を返す。
-// RFC 5997準拠のヘルスチェック応答。認証の口は Access-Accept（D-09 5.8）、Accounting の口は
-// Accounting-Response（D-10 4.7）を返す。
+// RFC 5997準拠のヘルスチェック応答。認証の口は Access-Accept（D-09 §5.7）、Accounting の口は
+// Accounting-Response（D-10 §4.3）を返す。
 // Message-Authenticator検証失敗時は failEventID のWARNログを出してnilを返す（応答なし）。
 func HandleStatusServer(request *radius.Packet, secret []byte, respCode radius.Code, failEventID, srcIP, traceID string) *radius.Packet {
 	// 1. Message-Authenticator検証

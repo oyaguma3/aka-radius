@@ -5,7 +5,7 @@ info:
   description: |
     加入者（状態・認証ベクターの取得先・認可ポリシーのルール）を操作し、ノードの状態と監査ログを読み出す API。
     MVP セットでは、管理クライアントは aka-provisioner だけ（設計概要 §11）。
-    本PoC の Provisioning API 0.4.0（`/admin/v1`、`docs/openapi/provisioning-api.yaml`）の後継で、互換は持たない。
+    本PoC の Provisioning API 0.4.0（`/admin/v1`）の後継で、互換は持たない。方針・認証・監査ログは D-13 管理API 詳細設計書にある。
 
     2.0.0-draft（MVP セットの段階 2-3）:
     - パスを `/admin/v2` にした。

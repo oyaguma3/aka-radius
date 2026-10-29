@@ -20,7 +20,7 @@ const (
 	MaxResyncCount = 1
 )
 
-// サーバーシャットダウン設定（D-09 3.9準拠）
+// サーバーシャットダウン設定（D-09 §3.5）
 const (
 	ShutdownTimeout = 5 * time.Second
 )
