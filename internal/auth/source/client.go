@@ -6,7 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -138,8 +138,8 @@ func (c *Client) Breaker() BreakerStatus {
 type avRequest struct {
 	HssAuthType           string      `json:"hssAuthType"`
 	NumOfRequestedVectors int         `json:"numOfRequestedVectors"`
-	ResynchronizationInfo *resyncInfo `json:"resynchronizationInfo,omitempty"`
-	AnID                  string      `json:"anId,omitempty"`
+	ResynchronizationInfo *resyncInfo `json:"resynchronizationInfo,omitzero"`
+	AnID                  string      `json:"anId,omitzero"`
 }
 
 type resyncInfo struct {

@@ -10,7 +10,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -99,7 +100,7 @@ func (s *Server) WriteRegistry(t testing.TB, timeout string) string {
 		"clientCertFile": "client.pem", "clientKeyFile": "client.key", "serverCaFile": "server-ca.pem",
 		"timeout": timeout,
 	}}}
-	data, err := json.MarshalIndent(f, "", "  ")
+	data, err := json.Marshal(f, jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func (s *Server) Vectors() []Vector {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	m := pathPattern.FindStringSubmatch(r.URL.Path)
 	var body map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	_ = json.UnmarshalRead(r.Body, &body)
 	req := Request{TraceID: r.Header.Get("X-Trace-ID"), Body: body}
 	if m != nil {
 		req.IMSI, req.PathType = m[1], m[2]
@@ -197,7 +198,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"hssAuthenticationVectors": []any{item}})
+	_ = json.MarshalWrite(w, map[string]any{"hssAuthenticationVectors": []any{item}})
 }
 
 // Problem は契約の ProblemDetails を返す。
