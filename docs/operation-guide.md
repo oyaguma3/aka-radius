@@ -1,7 +1,7 @@
 # 運用ガイド
 
 - 対象: aka-radius を MVP セットのデータ面の VPS で動かす人。
-- 関連: [README](../README.md)（起動と基本操作、コマンドと設定の一覧）、[設計概要](design-overview.md)（決定事項と段階の記録）、[管理API](openapi/admin-api.yaml)、[認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)（aka-mvpset）、aka-vecgen の[運用ガイド](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/operation-guide.md)。細かい仕様は D-文書（[ドキュメント一覧](EAP-AKA_RADIUS_PoC環境_ドキュメント一覧_r69.md)）にある。
+- 関連: [README](../README.md)（起動と基本操作、コマンドと設定の一覧）、[設計概要](design-overview.md)（決定事項と段階の記録）、[管理API](openapi/admin-api.yaml)、[認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)（aka-mvpset）、aka-vecgen の[運用ガイド](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/operation-guide.md)。細かい仕様は D-文書（[ドキュメント一覧](aka-radius_ドキュメント一覧_r70.md)）にある。
 
 ## 1. 構成と置き場所
 

@@ -1,0 +1,12 @@
+# SSID がルールに合わず拒否（設定: config_stage2.yaml。AUTH_POLICY_DENIED）
+# 加入者 H のルールは nasId "ap-01"・ssids ["ssid1"]（S-01 の 3.2）。SSID は Called-Station-Id の最初の : より後ろ
+version: 1
+name: reject_rule_ssid
+identity: "0440100000000008@wlan.mnc010.mcc440.3gppnetwork.org"
+radius:
+  attributes:
+    called_station_id: "00-11-22-33-44-55:ssid2"
+expect:
+  result: reject
+trace:
+  level: verbose

@@ -204,7 +204,7 @@ func TestNameFromRequest(t *testing.T) {
 	}
 }
 
-// TestTLSHandshake は実際の TLS 接続で、登録済みの証明書だけを受け付けることを確認する（D-13 §9）。
+// TestTLSHandshake は実際の TLS 接続で、登録済みの証明書だけを受け付けることを確認する（D-13 §2.1）。
 func TestTLSHandshake(t *testing.T) {
 	serverCert := validKeyPair(t, "aka-radius-admin")
 	dir := t.TempDir()

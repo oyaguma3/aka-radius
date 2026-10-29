@@ -1,0 +1,12 @@
+# EAP-AKA' の再同期（設定: config_stage2_resync.yaml。加入者 B を使う）
+# eapaka_test は SQN を設定の sim.imsi（A）ごとに保存するので、resync_aka.yaml の後の大きな SQN と B の aka-vecgen の SQN が比べられて再同期になる
+# 再同期が起きたことは、auth のログの EAP_RESYNC_CHALLENGE で確かめる
+version: 1
+name: resync_aka_prime
+identity: "6440100000000002@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: accept
+  mppe:
+    require_present: true
+trace:
+  level: verbose

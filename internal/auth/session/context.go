@@ -8,7 +8,7 @@ import (
 	"github.com/oyaguma3/aka-radius/internal/auth/store"
 )
 
-// EAPContext はEAP認証コンテキストを表す（D-09 セクション6.6.1/9.2.1準拠）。
+// EAPContext はEAP認証コンテキストを表す（D-09 §6.6）。
 type EAPContext struct {
 	IMSI                 string `redis:"imsi"`
 	Stage                string `redis:"stage"`
