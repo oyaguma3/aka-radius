@@ -50,6 +50,9 @@ func TestAddAuthOKAndList(t *testing.T) {
 	s := NewStore(rdb)
 	ctx := t.Context()
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, JST)
+	// 期限（EXPIREAT）を固定の時刻で付けるので、miniredis の時計も同じ時刻に合わせる
+	// （合わせないと、実際の日付が進むと書いたキーがすぐに期限切れになる）。
+	mr.SetTime(now)
 	for _, x := range []struct {
 		tenant int64
 		imsi   string

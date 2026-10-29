@@ -27,7 +27,11 @@ func newRecEnv(t *testing.T) *recEnv {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return &recEnv{mr: mr, rs: NewRecordStore(rdb), sess: sessions.NewStore(rdb), now: time.Date(2026, 10, 28, 12, 0, 0, 0, usage.JST)}
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, usage.JST)
+	// 期限（EXPIREAT）を固定の時刻で付けるので、miniredis の時計も同じ時刻に合わせる
+	// （合わせないと、実際の日付が進むと書いたキーがすぐに期限切れになる）。
+	mr.SetTime(now)
+	return &recEnv{mr: mr, rs: NewRecordStore(rdb), sess: sessions.NewStore(rdb), now: now}
 }
 
 func (e *recEnv) rec(kind Kind, sec, in, out uint64) Record {
