@@ -1,3 +1,5 @@
+# 仮名の Identity から永続 ID を求められる場合（設定: config_stage2.yaml）
+# aka-radius は仮名を扱わず AT_PERMANENT_ID_REQ を送り、eapaka_test が AT_IDENTITY で返す永続 ID（sim.imsi の A）で認証する
 version: 1
 name: perm_id_req_from_pseudonym
 identity: "2some-pseudonym@example"

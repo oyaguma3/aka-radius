@@ -1,0 +1,12 @@
+# NAS-Identifier がルールに合わず拒否（設定: config_stage2.yaml。AUTH_POLICY_DENIED）
+# 加入者 H のルールは nasId "ap-01"・ssids ["ssid1"]（S-01 の 3.2）
+version: 1
+name: reject_rule_nas
+identity: "0440100000000008@wlan.mnc010.mcc440.3gppnetwork.org"
+radius:
+  attributes:
+    nas_identifier: "ap-02"
+expect:
+  result: reject
+trace:
+  level: verbose

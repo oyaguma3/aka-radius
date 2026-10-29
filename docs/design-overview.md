@@ -1,7 +1,7 @@
-# aka-radius 設計概要（下書き）
+# aka-radius 設計概要
 
 - 作成日: 2026-10-25
-- 状態: 下書き。§18 の確認事項は 2026-10-26 にすべて推奨案で合意した（§3.2 の決定事項 1〜13）。
+- 状態: 段階 2（2-1〜2-6）を終えた（2026-10-29）。§18 の確認事項は 2026-10-26 にすべて推奨案で合意した（§3.2 の決定事項 1〜13）。段階 2 で決めたことは §17.1 に記録した。本書は決定事項と段階の記録として残し、今の作りの細部はコード・OpenAPI・運用ガイド・改版した D-文書を正とする（§17.2）。
 - 置き場所: 2026-10-27（MVP セットの段階 1）に、aka-mvpset の `docs/nodes/aka-radius.md` から本リポジトリの `docs/design-overview.md` に移した。本PoC の D-文書の体系は履歴ごと引き継ぎ、MVP の変更は本書にまとめる（段階 0 の進め方 S4。§17.2）。
 - 対象: EAP-AKA / EAP-AKA' の RADIUS サーバー aka-radius（もとは eapaka-radius-server-poc。以下「本PoC」）。
 - 関連:
@@ -9,7 +9,7 @@
   - 認証ベクターAPI の契約（以下「契約」）: [av-api-contract.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)。とくに §16.2（aka-radius の改修 R1〜R7）
   - 課金レコード: [charging-records.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/charging-records.md) §5.2・§8.1（利用の集計）
   - aka-vecgen の設計概要: aka-vecgen の [`docs/design-overview.md`](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/design-overview.md)（状態の値と口、管理クライアントのピン、監査ログの書き出しをそろえる）
-  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）
+  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r70.md)）
 
 ## 1. 位置づけ
 
@@ -86,7 +86,7 @@
 | 認証（auth） | 1812/udp | サービス用の WireGuard のアドレス（エッジのトンネルの IP からだけ受ける） | 共有シークレット、Message-Authenticator 必須 |
 | Accounting（acct） | 1813/udp | 同上 | 共有シークレット、Request Authenticator |
 | 管理API（admin） | 9444/tcp | サービス用の WireGuard のアドレス（aka-provisioner から） | mTLS（管理クライアントのピン） |
-| healthcheck | 各コンテナのループバック | コンテナの中だけ | なし（Valkey に届くかを返す） |
+| healthcheck | 各コンテナのループバック（`127.0.0.1:9090`、HTTP の `GET /healthz`） | コンテナの中だけ | なし（Valkey に届くかを返す。コマンド `aka-radius healthcheck` が叩く。段階 2-5 の K10） |
 
 - 予備の共有シークレット（本PoC の `RADIUS_SECRET`）は既定で空にし、登録していない送信元のパケットは捨てる（概要 §5.3）。
 - 取得先へは、auth のコンテナから mTLS でつなぐ。aka-vecgen とは、データ面のノードの中の共有の Docker のネットワークを使う。
@@ -101,11 +101,14 @@
 | `sub:{imsi}` | Hash | なし | `state`、`state_changed_at`、`source_id`、`rules`（JSON）、`created_at`、`updated_at` | もとの `sub:`（鍵と SQN）と `policy:` を置き換える |
 | `subs` | Sorted Set | なし | IMSI の索引（辞書順。一覧と前方一致） | 新しく足す（本PoC は SCAN） |
 | `cnt:src:{id}` | String | なし | 取得先ごとの加入者の数（登録・変更・削除の Lua で増減） | 新しく足す |
-| `client:{ip}`、`idx:client:{id}`、`seq:client` | Hash ほか | なし | RADIUS クライアント（`name`、`secret`、`trust_stamp`（`0`/`1`）、`created_at`） | `trust_stamp` を足し、`vendor` を外す |
+| `client:{ip}` | Hash | なし | RADIUS クライアント（`name`、`secret`、`trust_stamp`（`0`/`1`）、`created_at`、`updated_at`） | `trust_stamp` を足し、`vendor` を外す |
+| `clients` | Set | なし | RADIUS クライアントの IP の索引（一覧と数。段階 2-5 の K2） | 本PoC の `idx:client:{id}`・`seq:client`（ID の採番）を置き換える |
+| `stat:sources` | String（JSON） | なし | auth が報告する取得先ごとの遮断器の状態（`state`・`since`）と報告の時刻。状態が変わったときと 30 秒ごとに書く（`/status`・`/sources`。段階 2-5 の K4） | 新しく足す |
 | `eap:{traceId}` | Hash | 60 秒 | EAP の会話の状態。本PoC の項目に、`tenant_id`、採ったルールの番号、`source_id`、`identity` を足す | 項目を足す |
-| `sess:{uuid}` | Hash | 24 時間（Interim で延ばす） | セッション。`imsi`、`tenant_id`、`nas_ip`（エッジ）、`nas_identifier`、`calling_station_id`、`start_time`、`acct_session_id`、Accounting の最後の累計（時間・送受信の量） | `tenant_id` と累計を足す |
+| `sess:{uuid}` | Hash | 24 時間（Start・Interim で延ばす） | セッション。`imsi`、`tenant_id`、`nas_ip`（エッジ）、`nas_identifier`、`calling_station_id`、`client_ip`、`acct_id`、`start_time`、`last_update`、Accounting の最後の累計（`seconds`・`input_octets`・`output_octets`。表示用） | `tenant_id` と累計を足す |
 | `idx:sess:imsi:{imsi}`、`idx:sess:tenant:{id}` | Sorted Set | なし | セッションの索引。スコアはセッションの期限の時刻で、読むときと定期の処理で期限を過ぎたものを消す | 本PoC の `idx:user:`（TTL も掃除もない Set）を置き換える |
-| `acct:seen:{nasIp}:{acctSessionId}` | String | 24 時間 | Accounting の重複の判定 | NAS ごとに分ける |
+| `acct:seen:{送信元の IP}:{NAS-Identifier か NAS-IP-Address}:{Acct-Session-Id}` | Hash | 24 時間（受けるたびに延ばす） | Accounting の重複の判定（最後の種類）と前回の累計（時間・送受信の量）、IMSI、テナント（段階 2-4 の J2・J3） | NAS ごとに分け、累計を持たせる |
+| `stat:sessions` | Hash | なし | acct が 1 時間ごとの掃除で数えたセッションの数と時刻（`/status`） | 新しく足す |
 | `usage:{yyyymmdd}:{tenantId}:{imsi}` | Hash | 8 日 | 利用の集計（§10） | 新しく足す |
 | `usage:idx:{yyyymmdd}` | Sorted Set | 8 日 | その日の集計のキーの索引（取り出しのページ送り） | 新しく足す |
 | `audit` | Stream | 件数の上限 | 管理API とコマンドの監査ログ | `audit:prov` を改める |
@@ -128,7 +131,7 @@
 
 ### 7.1 取得先の登録簿
 
-- ファイル（`RADIUS_SOURCES_FILE`。JSON）に置き、`SIGHUP` で読み直す（§18 の C3）。証明書と鍵はファイル（Docker の secrets）で渡し、登録簿からはパスで指す。
+- ファイル（`RADIUS_SOURCES_FILE`。JSON）に置き、`SIGHUP` で読み直す（§18 の C3）。証明書と鍵は登録簿と同じディレクトリ `deployments/sources/` に置いてマウントし（段階 2-2 の B2。§14）、登録簿からはパスで指す。
 
 | 項目 | 内容 |
 |---|---|
@@ -231,14 +234,14 @@
 | `seconds` | Interim・Stop | Acct-Session-Time の前回の累計からの増分 |
 | `in_octets`、`out_octets` | Interim・Stop | Acct-Input/Output-Octets と Gigawords（× 2^32）を合わせた値の、前回の累計からの増分 |
 
-- 前回の累計はセッションに持ち、増分の計算・累計の更新・集計への足し込みを 1 つの Lua で原子的に行う。同じ値の再送は増分が 0 になるので、数え直しにならない。累計が減ったとき（NAS の作り直しなど）は、その値をそのまま増分とみなし、ログに出す。
+- 前回の累計は重複の判定のキー（`acct:seen:…`）に持ち、重複の判定・増分の計算・累計の更新・集計への足し込み・セッションと索引の更新を 1 つの Lua で原子的に行う（段階 2-4 の J2 で、セッションに持つ案から改めた。Class がない・セッションが消えている Accounting でも増分を計算できるように）。同じ値の再送は増分が 0 になるので、数え直しにならない。累計が減ったとき（NAS の作り直しなど）は、その値をそのまま増分とみなし、ログに出す（`USAGE_COUNTER_RESET`）。
 - 日は Event-Timestamp があればその時刻、なければ受け取った時刻の、日本時間の日付。キーは `usage:{yyyymmdd}:{tenantId}:{imsi}` で、8 日で消える（7 日分を取り出せるように 1 日余裕を持たせる）。
 - 刻印のないパケットはテナントの ID を `0` として集計し、ログに出す（エッジを通らないパケットは来ない前提だが、取りこぼしを見えるようにする）。
 - 本PoC の acct が持たなかった Gigawords と Event-Timestamp を扱うようにする。
 
 ### 10.3 Accounting の重複の判定
 
-- `acct:seen:{nasIp}:{acctSessionId}` に最後の種類（`start` / `interim` / `stop`）を持ち、判定と更新を 1 つの Lua で行う（本PoC は GET と SET の 2 回で、原子的でなかった）。
+- `acct:seen:…`（§6.1）に最後の種類（`start` / `interim` / `stop`）を持ち、判定と更新を §10.2 の 1 つの Lua で行う（本PoC は GET と SET の 2 回で、原子的でなかった）。
 - 判定の規則（Start の重複、Stop の後の Interim など）は本PoC の D-10 のまま。
 
 ## 11. 管理API（9444、mTLS）
@@ -248,7 +251,7 @@
 ### 11.1 認証・ヘッダー・エラー
 
 - mTLS 必須。管理クライアントのピンはファイル（`RADIUS_ADMIN_CLIENTS_FILE`）で、`SIGHUP` で読み直す。同じ識別名に新旧 2 つのフィンガープリントを書ける（aka-vecgen の決定事項 7）。
-- `X-Operator-Id`、`X-Trace-ID` は本PoC と同じ。エラーは ProblemDetails で `cause` を入れる。主な `cause`: `VALIDATION_ERROR`、`SUBSCRIBER_NOT_FOUND`、`SUBSCRIBER_EXISTS`、`SUBSCRIBER_ACTIVE`、`SUBSCRIBER_TERMINATED`、`STATE_TRANSITION_NOT_ALLOWED`、`UNKNOWN_SOURCE`、`SYSTEM_FAILURE`。
+- `X-Operator-Id`、`X-Trace-ID` は本PoC と同じ。エラーは ProblemDetails で `cause` を入れる。`cause` は本PoC の Provisioning API 0.4.0 の名前を残し（`INVALID_MSG_FORMAT`・`INVALID_QUERY_PARAM`・`MANDATORY_IE_MISSING`・`MANDATORY_IE_INCORRECT`・`OPTIONAL_IE_INCORRECT`・`USER_NOT_FOUND`・`SUBSCRIBER_ALREADY_EXISTS`・`SYSTEM_FAILURE`）、MVP で足す誤りは aka-vecgen と同じ名前（`SUBSCRIBER_ACTIVE`・`SUBSCRIBER_TERMINATED`・`STATE_TRANSITION_NOT_ALLOWED`）、aka-radius だけにある `UNKNOWN_SOURCE` を足す（段階 2-3 の G11。前の版の `VALIDATION_ERROR`・`SUBSCRIBER_NOT_FOUND`・`SUBSCRIBER_EXISTS` は、aka-vecgen 2-1 で「もとの名前を残す」と決める前に書いたもの）。
 - `Idempotency-Key` は扱わない。再送の判定は aka-provisioner に任せる（aka-vecgen の決定事項 11 と同じ）。
 
 ### 11.2 口
@@ -257,7 +260,7 @@
 
 | 口 | 内容 | 本PoC からの変更 |
 |---|---|---|
-| `GET /status` | 版、起動日時、加入者の数、RADIUS クライアントの数、セッションの数、取得先ごとの加入者の数と遮断器の状態、刻印の Vendor-Id と Vendor-Type、管理クライアントの識別名と読み直しの日時 | 取得先・刻印・管理クライアントを足す |
+| `GET /status` | 版、起動日時、加入者の数、RADIUS クライアントの数、セッションの数、取得先ごとの加入者の数と遮断器の状態（auth の報告）、刻印の Vendor-Id と Vendor-Type、管理クライアントの識別名と読み直しの日時 | 取得先・刻印・管理クライアントを足す |
 | `GET /subscribers` | 一覧（カーソル、1 ページ 500 件まで、IMSI の前方一致）。`total` を返す | `subs` の索引を使う（本PoC は SCAN） |
 | `POST /subscribers/batch-get` | 一括取得（`imsis` 500 件まで）。`items` と `notFound` | 新しく足す |
 | `POST /subscribers` | 登録（`imsi`、`state`（`active` / `inactive`）、`sourceId`、`rules`） | 加入者と認可ポリシーを 1 つにする |
@@ -268,8 +271,8 @@
 | `DELETE /subscribers/{imsi}` | 物理削除。`active` では 409。セッションは消さない（期限で消える） | 状態の検査を足す |
 | `GET /sessions` | セッションの一覧（絞り込み: `tenantId`、`imsi`（複数可、100 件まで）。カーソル） | テナントと複数 IMSI の絞り込みを足す |
 | `GET /usage` | 利用の集計（`date`（日本時間の日付）必須、カーソル、1 ページ 1,000 件まで） | 新しく足す |
-| `GET /clients` | RADIUS クライアントの一覧（IP、名前、`trustStamp`。共有シークレットは返さない） | 書き込みと `/secret` をなくす |
-| `GET /sources` | 取得先の登録簿（証明書の期限を含む。鍵のパスは返さない） | 新しく足す |
+| `GET /clients` | RADIUS クライアントの一覧（IP の順、ページ送りなし。IP、名前、`trustStamp`、作成と更新の日時。共有シークレットは返さない） | 書き込みと `/secret` をなくす |
+| `GET /sources` | 取得先の登録簿（ファイルの順。クライアント証明書の主体名・期限・フィンガープリント、サーバーの CA の主体名と期限、加入者の数、遮断器の状態。鍵とファイルのパスは返さない） | 新しく足す |
 | `GET /audit-logs` | 監査ログ | — |
 
 - 本PoC の `/subscribers/{imsi}/keys`、`/policies` 系、`/clients` の書き込み、`/clients/{id}/secret` はなくす。
@@ -277,36 +280,36 @@
 
 ## 12. コマンド
 
-`docker compose exec admin aka-radius <サブコマンド>` で、動いているコンテナの中で使う。使ったことは監査ログに残す（操作者は `cli`）。
+`docker compose exec admin aka-radius <サブコマンド>` のように、動いているコンテナの中で使う。書き込みのコマンドは監査ログに残す（管理クライアントは `cli`、操作者は `-operator`。既定 `cli`）。読むだけのコマンドは残さない。
 
-| サブコマンド | 内容 |
-|---|---|
-| `client add / list / update / remove` | RADIUS クライアント（エッジのトンネルの IP、名前、共有シークレット、`trust_stamp`）。エッジを足すときに、WireGuard のピアの設定と一緒に行う（§18 の C6） |
-| `sources check` | 取得先の登録簿のファイルの検査と、各取得先への接続の確かめ（TLS のハンドシェイク） |
-| `admin-cert` | 管理API のサーバー証明書（自己署名）の作成と表示 |
-| `fingerprint` | 証明書のフィンガープリントの表示 |
-| `healthcheck` | コンテナの healthcheck |
+| サブコマンド | コンテナ | 内容 |
+|---|---|---|
+| `client add / list / update / remove` | admin | RADIUS クライアント（エッジのトンネルの IP、名前、共有シークレット、`trust_stamp`）。エッジを足すときに、WireGuard のピアの設定と一緒に行う（§18 の C6）。`-trust-stamp` は必須。共有シークレットは標準入力の 1 行から読むか、`-generate` で作って 1 回だけ表示する（16〜128 文字）。auth・acct はパケットのたびに引くので、すぐに効く |
+| `sources check` | auth（`docker compose run --rm --no-deps auth sources check`） | 取得先の登録簿のファイルの検査（形、証明書と鍵の組、証明書の期限。30 日より近ければ警告）と、各取得先への接続の確かめ（TLS でつながり、HTTP の応答が返るか。応答の状態は問わない） |
+| `admin-cert [show]`・`admin-cert create` | admin | 管理API のサーバー証明書の表示（主体名・SAN・期限・フィンガープリント）と、自己署名の証明書と鍵（ECDSA P-256、10 年）の作成 |
+| `fingerprint` | どれでも | 標準入力の証明書（PEM）の SHA-256 のフィンガープリントの表示（ピンのファイルに書く値） |
+| `healthcheck` | どれでも | 同じコンテナのループバックの healthcheck の口に問い合わせる（compose の healthcheck） |
 
 ## 13. ログと監査ログ
 
 - ログの経路は本PoC のまま、Docker のログドライバー `fluentd` から Fluent Bit に送り、アプリごとのファイルに書く（§18 の C10）。ホストの logrotate で日ごとに圧縮し、ノードで 2 週間持つ（本PoC は 30 世代）。監視用の PC が取りに行く（概要 §13）。データ面の aka-vecgen も同じ Fluent Bit に送る。
-- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`、`AUTH_DUPLICATE_REPLAYED`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`。
+- `event_id` は本PoC の D-04 を引き継ぎ、次を足す・改める: `AUTH_SUBSCRIBER_NOT_FOUND`・`AUTH_SUBSCRIBER_INACTIVE`・`AUTH_SUBSCRIBER_TERMINATED`（`AUTH_SUBSCRIBER_SUSPENDED` を置き換える）、`AUTH_STAMP_MISSING`・`AUTH_STAMP_MULTIPLE`・`AUTH_STAMP_INVALID`・`AUTH_STAMP_LOOKUP_ERR`、`AUTH_SUBSCRIBER_INVALID`・`AUTH_SUBSCRIBER_LOOKUP_ERR`、`EAP_IDENTITY_MISMATCH`、`AUTH_DUPLICATE_REPLAYED`・`ACCT_DUPLICATE_REPLAYED`、`RADIUS_OVERLOAD`、`VECTOR_*`（取得先の ID つき。`VECTOR_IMSI_NOT_FOUND` をなくし `VECTOR_REJECTED` に）、`SOURCES_RELOADED`、`ADMIN_CLIENTS_RELOADED`、`USAGE_COUNTER_RESET`・`USAGE_WRITE_ERR`、`ACCT_TENANT_UNKNOWN`・`ACCT_IMSI_UNKNOWN`・`ACCT_USAGE_TOO_OLD`・`ACCT_EVENT_TIMESTAMP_FUTURE`・`ACCT_STAMP_MULTIPLE`・`ACCT_STAMP_INVALID`・`ACCT_STAMP_LOOKUP_ERR`、`SESSION_SWEPT`・`SESSION_SWEEP_ERR`。
 - `RADIUS_LOG_MASK_IMSI` の既定を `false` にする（決定事項 26）。
-- 監査ログは Valkey の Stream（件数の上限つき）と、日ごとの追記だけの JSONL のファイル（`RADIUS_AUDIT_DIR`）に書く（aka-vecgen の決定事項 9）。本PoC の「標準出力が正本、Stream が写し」と、Admin-TUI のリダイレクト頼みの監査ログは、この 1 系統にまとめる。
+- 監査ログは Valkey の Stream（件数の上限つき）と、日ごとの追記だけの JSONL のファイル（`RADIUS_AUDIT_DIR`）に書く（aka-vecgen の決定事項 9）。本PoC の「標準出力が正本、Stream が写し」と、Admin-TUI のリダイレクト頼みの監査ログは、この 1 系統にまとめる。ファイルの形・日本時間の区切り・前の日の gzip・14 日での削除は aka-vecgen と同じ（段階 2-5 の K9）。
 
 ## 14. 配備
 
 - compose に auth・acct・admin・Valkey・Fluent Bit を置く。データ面のノードで aka-vecgen と並べる。
 - 1812/udp・1813/udp と 9444/tcp は、サービス用の WireGuard のアドレスにだけ結び付け、nftables の `DOCKER-USER` で送信元を絞る（概要 §5.3）。
 - auth は、aka-vecgen が作る共有の Docker のネットワークに参加する（本PoC の `aka-av` を vector-gateway から auth に移す）。
-- 取得先のクライアント証明書と鍵、管理クライアントのピンのファイル、取得先の登録簿は Docker の secrets で渡す。読み直しは `docker compose kill -s HUP auth admin`。
+- 取得先の登録簿と、取得先ごとのクライアント証明書・鍵・サーバーの CA は、ディレクトリ `deployments/sources/` をマウントして渡す（段階 2-2 の B2）。管理クライアントのピンのファイルは Docker の secrets で、管理API のサーバー証明書はディレクトリ `deployments/certs/admin/` で渡す（段階 2-5）。読み直しは `docker compose kill -s HUP auth admin`。
 
 ## 15. 試験
 
 | 層 | 内容 |
 |---|---|
 | 単体 | EAP の状態機械（AT_IDENTITY からの IMSI、再同期の上限 1）、刻印（信頼の印、2 つ以上、数字でない値）、ルールの評価、増分の計算（Gigawords、累計の減少、再送）、重複応答のキャッシュ、登録簿の読み直し（形の誤り、使用中の取得先の削除） |
-| 結合（実際の Valkey、取得先の模型） | 認証の流れ（拒否する IMSI で取得先を呼ばないこと）、Accounting と利用の集計、索引の掃除、管理API（状態、一括取得、セッションの絞り込み、利用の取り出し）、遮断器 |
+| 結合（実際の Valkey、取得先の模型。段階 2 の実装では、結合試験は miniredis と偽の取得先と本物の UDP で書き、本物の Valkey は CI の「README の手順の通し確認」と検証機の通しで確かめた（T-01）） | 認証の流れ（拒否する IMSI で取得先を呼ばないこと）、Accounting と利用の集計、索引の掃除、管理API（状態、一括取得、セッションの絞り込み、利用の取り出し）、遮断器 |
 | 結合（aka-vecgen） | aka-vecgen を相手に、EAP-AKA と EAP-AKA' の認証と再同期（eapaka_test）。本PoC の手順書の結合試験（T-03）は、Go のコードで動く試験に置き換えて CI で走らせる |
 | E2E | aka-mvpset の `scripts/e2e.sh`（エッジを通す経路、刻印、状態による拒否。概要 §16.3） |
 | 規模 | 加入者 20 万件・セッション 20,000 件で、ピーク 50 TPS を 30 分（概要 §16.1）。一覧とセッションの絞り込みの時間 |
@@ -329,23 +332,103 @@
 | 段階 | 内容 | 終わりの確かめ |
 |---|---|---|
 | 1 | リポジトリ `aka-radius` を作り、本PoC の履歴ごと移す。改名だけ（module パス、コマンド、環境変数の接頭辞、Docker のネットワーク名、イメージ名、文書） | 今の CI が通る |
-| 2-1 | 1 つのモジュールにまとめ、Gin・resty・vector-api・Admin-TUI を外す。auth と acct の共通の部分をまとめる | 単体、ビルド |
-| 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7） | 単体、aka-vecgen との結合 |
-| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限 | 単体、結合 |
-| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計） | 単体、結合 |
-| 2-5 | 管理API 2.0.0、コマンド、ピンのファイル、監査ログの書き出し、healthcheck | 結合、aka-provisioner との契約の試験 |
-| 2-6 | D-文書の改版、運用ガイド、README | simwifi で aka-vecgen と通す |
+| 2-1 | 1 つのモジュールと 1 つのコマンドにまとめ、Admin-TUI と vector-api を外す。auth と acct の共通の部分をまとめる（Gin はこの手順では外さない。2-2 と 2-3 で口ごと消える） | 単体、ビルド |
+| 2-2 | 取得先の登録簿と取得先のクライアント（vector-gateway の取り込み、契約の R1〜R7。gateway の Gin が消える） | 単体、aka-vecgen との結合、検証機での最初の通し（eapaka_test で EAP-AKA・EAP-AKA'・再同期） |
+| 2-3 | 加入者（状態、取得先、ルール）、刻印、判定の順の変更、Identity の取り方、重複応答のキャッシュ、要求の期限と上限、管理API 2.0.0 の加入者の口（provisioning-api を置き換える。Gin がすべて消える） | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-3 で決めたこと」 |
+| 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-4 で決めたこと」 |
+| 2-5 | 管理API 2.0.0 の残り（RADIUS クライアントと取得先の読み出し）、コマンド、ピンのファイル、監査ログの書き出し、healthcheck、共有のネットワークの名前 `eapaka-prov` を決め直す | 結合。**済み（2026-10-28）**: 下の「段階 2-5 で決めたこと」 |
+| 2-6 | D-文書の改版、運用ガイド、README | 検証機で全体を通す（刻印はエッジの代わりの radsecproxy で付け、Accounting は radclient で送る）。**済み（2026-10-29）**: 下の「段階 2-6 で決めたこと」 |
 
-- 2-2 は aka-vecgen の段階 2-1 と同じ時期に行う（aka-vecgen の設計概要 §16）。
+- 手順の組み替え（2026-10-27。aka-mvpset の概要 §18.5 の H3）: データの形と、それを読み書きする口は同じ手順で変える（管理API の加入者の口を 2-3 に、`/sessions`・`/usage` を 2-4 に移した）。
+- 2-1・2-2 は aka-vecgen の 2-1 の後に行う（概要 §18.5 の H1）。
+- 手順ごとに feature ブランチと develop への PR（squash）を作り、develop → main は段階 2 の終わりに 1 回だけ行う。D-文書は 2-6 でまとめて改版し、それまでは本書を正とする（概要 §18.5 の H6）。
+- aka-provisioner との契約の試験は、aka-provisioner を作り直す段階 3-1 で行う（概要 §18.5 の H4）。
 
-### 17.2 D-文書の扱い（S4）
+段階 2-3 で決めたこと（2026-10-28。確認事項 G1〜G12 はすべて推奨案で合意）:
 
-| 区分 | 文書 |
-|---|---|
-| 改版する | D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-06（エラーハンドリング。管理API の章を足す）、D-08（インフラと運用）、D-09（auth）、D-10（acct）、D-13（管理API 2.0.0 に改める）、E-01・E-02・E-03、O-01〜O-05、T-01〜T-04、B-02・B-03、ドキュメント一覧 |
-| 廃止として記録する | D-03（vector-api の IF 定義書と状態機械。状態機械の部分は D-09 に移す）、D-05・D-07（Admin-TUI）、D-11（vector-api）、D-12（vector-gateway。取得先のクライアントは D-09 に書く） |
+- G1: 1 つの feature ブランチと 1 つの PR にした（加入者のデータの形を変えると auth と admin が同時に変わるため）。
+- G2: 本PoC の形のデータ（鍵と SQN の入った `sub:`、`policy:`）は移し替えない。`state` のない `sub:` は、ベクターを取らずに拒否する（`AUTH_SUBSCRIBER_INVALID`）。管理API では 500 になる。
+- G3: `masterdata`・`model`・`validation`（と使われていない `apperr`・`httputil`）を、`internal/subscriber` に置き換えた。登録・変更・状態の変更・削除は Lua で `sub:`・`subs`・`cnt:src:{id}` を一度に書き換える（Lua の中で取得先ごとの数のキーを組み立てるので、Valkey は単一ノード）。ルールの評価（`subscriber.Match`）も同じパッケージにし、`internal/auth/policy` を消した。
+- G4: admin は取得先の登録簿のディレクトリを読み取り専用でマウントし、ID と証明書の期限だけを読む（鍵は読まない。`source.ReadInfos`）。`SIGHUP` で読み直す。auth は、加入者が指している取得先（`cnt:src:{id}` が 0 でない）を消す読み直しを断る（2-2 の B3）。
+- G5: RADIUS クライアントの「刻印を信頼する」の印（`client:{ip}` の `trust_stamp`）は auth が読むだけ。印を付けるのは、2-5 のコマンドができるまで Valkey に直接書く。予備の共有シークレットで受けた送信元は印なしとして扱う。
+- G6: IMSI は EAP-Response/Identity の Type-Data と AKA-Identity の AT_IDENTITY から取り、User-Name は判定に使わない（違えば `EAP_IDENTITY_MISMATCH`）。鍵の導出に使う Identity は `eap:` の `identity` に残し、再同期でも使う（RFC 4187 §7）。
+- G7: 要求の期限（`RADIUS_REQUEST_TIMEOUT`、既定 4 秒）と同時に処理する上限（`RADIUS_MAX_INFLIGHT`、既定 256）を、auth と acct に共通の受け口（`radiussrv.Guard`）に入れた。上限を超えた要求は応えずに捨て（`RADIUS_OVERLOAD`。1 秒に 1 回に間引く）、期限を過ぎた処理は拒否で終える。
+- G8: 重複応答のキャッシュは `radiussrv.Guard` に作り、auth と acct の両方に入れた（§9 のとおり。件数の上限 50,000、超えたら古いものから消す）。処理中の重複は捨て、応えなかった要求（捨てた、パニック）は印を残さない。
+- G9: Accept のときに `sess:` に `tenant_id` を書く。`eap:` に `identity`・`tenant_id`・`rule_index`・`vlan_id`・`session_timeout` を足した。セッションの索引の作り直しと利用の集計は 2-4。
+- G10: 管理API は `net/http` の `/admin/v2` で作り直し、`/status`・加入者の 8 つの口・`/audit-logs` にした。`/admin/v1` はすべてなくした（Gin が依存から消えた）。管理クライアントのピンは 2-5 まで `RADIUS_ADMIN_CLIENTS` のまま。監査ログの Stream は `audit` に改め、項目を aka-vecgen にそろえた（日ごとのファイルは 2-5）。RADIUS クライアントの ID の採番（本PoC の起動のときの処理）もなくした（RADIUS クライアントは 2-5 のコマンド）。
+- G11: §11.1 の `cause` の名前を直した。
+- G12: OpenAPI は `docs/openapi/admin-api.yaml`（2.0.0-draft）。`provisioning-api.yaml` は D-13 と一緒に 2-6 で廃止の記録をする。刻印を付けた通しは 2-6（エッジの代わりの radsecproxy）。
+- そのほか: IMSI は本PoC と同じ 15 桁、ルールの値の範囲（NAS-Identifier 253 バイト、SSID 32 バイト・32 個、VLAN 1〜4094、Session-Timeout 1〜86400 秒）も本PoC と同じ。SSID の `*` はほかの SSID と混ぜられない。`/status` に取得先ごとの加入者の数を出す（遮断器の状態は auth の中にあるので 2-5 で決める）。
 
-- 文書とコードがずれている所（E-03 の pkg の利用表、D-09 の古い条件、D-03 の `VECTOR_API_URL` の例など）は、改版のときにコードを正として直す。
+段階 2-4 で決めたこと（2026-10-28。確認事項 J1〜J12 はすべて推奨案で合意）:
+
+- J1: 1 つの feature ブランチと 1 つの PR にした。
+- J2: 前回の累計を、セッションではなく重複の判定のキー（`acct:seen:…`。Hash）に持つ（§10.2 を改めた）。1 つの Accounting につき 1 つの Lua（`internal/acct/store` の `accountScript`）で、重複の判定・増分・累計の更新・集計への足し込み・セッションと索引の更新を行う。
+- J3: 重複の判定のキーは `acct:seen:{送信元の IP}:{NAS-Identifier（なければ NAS-IP-Address）}:{Acct-Session-Id}`（エッジの奥の AP の間で Acct-Session-Id が重ならないように）。
+- J4: 増分は今回の累計から前回の累計を引いたもの。Start の重複・Stop の後の Stop・同じ値の Interim は数えない。累計が減ったら、その値をそのまま増分にする。順序の誤り（`no_start_received`・`interim_after_stop`・`start_after_stop`）はログを出して数える。Stop の後の Start は 0 から数え直す。
+- J5: 日は Event-Timestamp（受け取った時刻より 1 時間以上先なら受け取った時刻。`ACCT_EVENT_TIMESTAMP_FUTURE`）の日本時間の日付。7 日より前の日には足し込まない（`ACCT_USAGE_TOO_OLD`）。集計のキーは、その日の始まりから 8 日で消える。
+- J6: テナントは、信頼する刻印 → 重複の判定のキーに残したテナント → セッションのテナントの順。どれもなければ `0`（`ACCT_TENANT_UNKNOWN`）。IMSI は、セッション → 重複の判定のキー → User-Name の永続 ID の順。分からなければ集計しない（`ACCT_IMSI_UNKNOWN`）。
+- J7: auth は Access-Accept で集計に `auth_ok` を 1 足す（`internal/usage`。書けなくても Accept を返し、`USAGE_WRITE_ERR`）。
+- J8: セッションと索引は `internal/sessions`（auth・acct・admin で共通）。auth が Accept で作って索引に足し、acct が Start・Interim で期限を延ばし、Stop で消す。acct が起動のときと 1 時間ごとに期限切れの索引を消す（`SESSION_SWEPT`）。本PoC の `idx:user:` はなくした。
+- J9: `GET /sessions` は `tenantId` か `imsi`（カンマ区切り 100 件まで）のどちらか 1 つが必須。期限の早い順、1 ページ 1,000 件まで、カーソルは位置。
+- J10: `GET /usage` は `date`（日本時間の `YYYY-MM-DD`）が必須。テナントと IMSI の辞書順、1 ページ 1,000 件まで。
+- J11: `/status` に、acct が数えたセッションの数と時刻を出す（`sessionCount`・`sessionsCountedAt`）。
+- J12: Accounting-On/Off はログだけ。acct の試験は、gomock をやめて偽物と miniredis で書き直した（`internal/acct/mocks` を消した）。
+- そのほか: acct は、記録できない（Valkey に書けない）ときは Accounting-Response を返さない（NAS に送り直させて、利用の集計の取りこぼしを防ぐ。本PoC は書けなくても応答していた）。acct も刻印の Vendor-Id・Vendor-Type（`RADIUS_STAMP_VENDOR_ID`・`RADIUS_STAMP_VENDOR_TYPE`）を読む。累計は Lua の数（倍精度）で扱うので、1 つのセッションで 2^53 オクテット（約 9 PB）までは正確。
+
+段階 2-5 で決めたこと（2026-10-28。確認事項 K1〜K15 はすべて推奨案で合意）:
+
+- K1: 1 つの feature ブランチと 1 つの PR にした。aka-vecgen の Fluent Bit の重ね合わせ（K14）は aka-vecgen の main に直接コミットした。
+- K2: RADIUS クライアントは `client:{ip}`（`name`・`secret`・`trust_stamp`・`created_at`・`updated_at`）と索引の Set `clients`（`internal/clients`）。§6.1 の `idx:client:{id}`・`seq:client` は消した。コマンド `client add / list / update / remove`（admin のコンテナ）。`-trust-stamp` は必須、共有シークレットは標準入力の 1 行か `-generate`（16〜128 文字、空白と制御文字を除く ASCII）。IP は auth・acct が引く形に直す（IPv4 に写した IPv6 は IPv4、ゾーンつきは誤り）。Valkey に直接書いたクライアントは索引にないので、一覧に出ない（消して入れ直す）。
+- K3: `GET /clients` は全件を IP の順に返す（共有シークレットは返さない）。`/status` に `clientCount`。
+- K4: auth が遮断器の状態を `stat:sources`（JSON）に、状態が変わったときと 30 秒ごとに書く。admin は `/status` と `/sources` に `circuitBreaker`（`state`・`since`・`reportedAt`）を出す。報告がなければ返さない。
+- K5: `GET /sources` はクライアント証明書の主体名・期限・フィンガープリントと、サーバーの CA の主体名と期限を返す（鍵とファイルのパスは返さない）。
+- K6: `sources check` は auth のコンテナで動かす（`docker compose run --rm --no-deps auth sources check`）。接続の確かめは、遮断器を通さずに基底の URL へ GET を 1 回送り、HTTP の応答が返るか（TLS 1.3 では、取得先がクライアント証明書を断ったことはハンドシェイクの後でしか分からないため、ハンドシェイクだけでは足りない）。
+- K7: 管理クライアントのピンは `RADIUS_ADMIN_CLIENTS_FILE`（既定 `/run/secrets/admin-clients`。compose の secrets）。形は aka-vecgen と同じ。環境変数 `RADIUS_ADMIN_CLIENTS` はなくした。`SIGHUP` でピン・サーバー証明書・取得先の登録簿を読み直す（それぞれ、失敗したら前のまま）。ピンが 1 つもないファイルは、起動でも読み直しでも誤りにした（aka-vecgen は空のファイルを受ける。aka-radius の admin は管理API のためだけのコンテナなので、だれも使えない状態で動かさない）。`/status` に `adminClientsLoadedAt`。
+- K8: `admin-cert`（表示）と `admin-cert create -hosts … -out <dir>`（自己署名、`server.pem` 644・`server.key` 600、上書きは `-force`、監査ログ `admin-server-certificate.create`）。`fingerprint` は標準入力の PEM。
+- K9: 監査ログは `internal/audit`（admin とコマンドで共通）。`RADIUS_AUDIT_DIR`（既定 `/var/lib/aka-radius/audit`）・`RADIUS_AUDIT_RETENTION_DAYS`（14）・`RADIUS_AUDIT_MAX_LEN`（10000。`RADIUS_ADMIN_AUDIT_MAX` を改めた）。admin は起動のときにディレクトリに書けるかを確かめ、起動のときと 1 時間ごとに圧縮と削除をする。
+- K10: healthcheck の口は `internal/health`（`RADIUS_HEALTH_ADDR`、既定 `127.0.0.1:9090`、`GET /healthz`、Valkey の PING を 1 秒まで）。compose の healthcheck は `aka-radius healthcheck`。
+- K11: イメージは `gcr.io/distroless/static-debian13:nonroot`（UID 65532）。マウントするファイルは 65532 で読めるようにする（README の「起動手順」）。
+- K12: admin の profile を外し、既定の `docker compose up` で起動する。
+- K13: 共有のネットワークは `aka-radius-admin`（`RADIUS_ADMIN_SHARED_NETWORK`）、admin の別名も `aka-radius-admin`。証明書は `deployments/certs/admin/`。aka-provisioner の重ね合わせの付け替えは段階 3-1、D-文書の直しは 2-6。
+- K14: Fluent Bit の出力に `app.vecgen`（`vecgen.log`）と `app.vecgen-valkey`（`vecgen-valkey.log`）を足した。aka-vecgen 側は `compose.fluent-bit.yaml`。
+- K15: OpenAPI を 2.0.0 にした。
+- K16（2-5 のマージの後の develop の CI で見つけた）: 2-3 の重複応答のキャッシュ（`radiussrv.Guard`）は、応答を送ってからキャッシュに入れていたので、その間に届いた再送を処理中として捨てていた（acct の結合試験がたまに落ちた）。応答はキャッシュに入れてから送るように直した。これだけでは足りず、段階 2-6 の確認事項 M11 で補った: `layeh.com/radius` の `PacketServer` も、同じ送信元と Identifier の要求をハンドラーが戻るまで黙って捨てていた。`radiussrv.Server` の一番外のハンドラーで処理を goroutine に渡してすぐに戻り、重複は `Guard` だけで扱う。停止のときは、処理中のパケットが応答を送り終えるのを待ってから待ち受けを閉じる。
+
+段階 2-6 で決めたこと（2026-10-28〜29。確認事項 M1〜M11 はすべて推奨案で合意）:
+
+- M1: 順は、検証機の通し → 小さなコードの直しと運用ガイド・README（PR 1 つ）→ D-文書（PR 1 つ）→ develop から main へ、とした。ただし M6 のコードの直しは検証機の通しより先に入れた（通しで直しとバックアップからの戻しも確かめるため。読み替え）。
+- M2: D-文書の分け方は §17.2 のとおり。
+- M3: 廃止する文書はファイルを消し、ドキュメント一覧に「廃止した文書」の節を作って、最後の版・廃止した日・移した先・本PoC の固定のコミット（`1f8aad1`）のその文書へのリンクを残す。
+- M4: 改版した D-文書は、コード・OpenAPI・運用ガイドを正にして参照し、その写し（compose の全文、main.go、構造体の定義、試験の一覧など）を持たない。本書は決定事項と段階の記録として残し、題の「（下書き）」を外した。
+- M5: 運用ガイド `docs/operation-guide.md` を新しく作り（12 章。aka-vecgen と同じく版数を持たない）、廃止する O-01〜O-04 の要る部分を取り込んだ。README は起動と基本の操作に絞り、ドキュメントの節は案内だけにした。
+- M6: 小さなコードの直し: Valkey の `maxmemory 1gb`、1812・1813/udp の公開先 `RADIUS_UDP_BIND`（既定 `127.0.0.1`）、Valkey のバックアップと戻しのスクリプト（`scripts/`）、lnav の書式、管理クライアントを断るイベントの名前 `ADMIN_CLIENT_REJECTED`（aka-vecgen にそろえた）、CI の「README の手順の通し確認」。
+- M7: 検証機の通しは aka-mvpset の `verify/stage2/`（29 項目。2026-10-29 に 29/29）。エッジの代わりの radsecproxy は、Debian 13 の 1.11.2 をテナントごとに 1 つ、UDP から UDP へ刻印を付けて使った（aka-mvpset の概要 §18.5 の H7 が書いていたパッチ版の radsecproxy ではなく、刻印を付けるだけなので配布の版で足りる。読み替え）。radclient はコンテナで動かした。
+- M8: 段階 2 の締めは、develop から main への PR を merge commit でマージし（タグは付けない）、aka-mvpset の `versions.env` の `VECGEN_REF`・`RADIUS_REF` を更新する。
+- M9: §7.1・§14 の取得先の証明書の渡し方を、Docker の secrets からディレクトリのマウントに改めた（段階 2-2 の B2）。§17.2 を M2 の分け方に改めた。
+- M10: CLAUDE.md の案内を、改版した D-文書と運用ガイドに向け直した。
+- M11: §17.1 の K16 の行に書いたとおり（RADIUS のライブラリの重複の判定に再送を捨てさせない）。
+
+### 17.2 D-文書の扱い（S4。段階 2-6 の M2 で改めた）
+
+段階 2-6 で、残す文書を改版し、要らなくなった文書を廃止した（ファイルを消し、ドキュメント一覧の「廃止した文書」に記録した）。今の版はドキュメント一覧にある。
+
+| 区分 | 文書 | 中身 |
+|---|---|---|
+| 改版 | D-01 設計仕様書（「aka-radius 設計仕様書」に改題）、D-02 Valkey データ設計仕様書 | ほぼ全面。本書の §1〜§6・§14 を骨にした |
+| 改版 | D-04 ログ仕様設計書 | `event_id` の一覧をコードと照合した。vector-gateway・vector-api・Admin-TUI の章を削り、管理API とコマンドの章を作り直した |
+| 改版 | D-06 エラーハンドリング詳細設計書 | auth・acct・admin・コマンドの 4 つに組み直し、管理API の章（ProblemDetails と `cause`）を足した。遮断器の表をコードに合わせた |
+| 改版 | D-08 インフラ設定・運用設計書 | compose と `.env` の全文の写しをやめ、構成を設計として書いた。D-12 の配置の話を取り込んだ |
+| 改版 | D-09 Auth Server詳細設計書 | 縮約。取得先のクライアント（D-12 から）と認可を作り直し、EAP の状態機械（D-03 から）を取り込んだ。コードの写しを削った |
+| 改版 | D-10 Acct Server詳細設計書 | Accounting の処理（1 つの Lua）を作り直し、コードの写しを要約にした |
+| 改版 | D-13 | 番号を残して「管理API 詳細設計書」に作り直した（口の詳細は OpenAPI を正にする） |
+| 改版 | E-01、E-02、T-01、O-05、S-01、ドキュメント一覧 | 今の作りに合わせて縮めた。一覧は「aka-radius ドキュメント一覧」に改題し、「廃止した文書」の節を作った |
+| 廃止（運用ガイドに統合） | O-01 操作ガイド、O-02 ポリシー設定ガイド、O-03 障害対応手順書、O-04 バックアップ・リストア手順書 | 運用ガイドの 4〜6・10・12 章 |
+| 廃止（ほかの D-文書へ） | D-03（状態機械は D-09 へ、ベクターの取得の口は契約へ）、D-12（D-09 と D-08 へ）、E-03（D-01・D-09・D-10・E-02 へ） | — |
+| 廃止 | D-05・D-07（Admin-TUI）、D-11（vector-api）、T-02〜T-04（試験は Go のコードと CI、E2E は aka-mvpset）、B-01〜B-03（配置は aka-mvpset の段階 5 の文書）、`docs/openapi/provisioning-api.yaml`（管理API 2.0.0 の `admin-api.yaml` に置き換えた） | — |
+
+- 段階 0 の進め方 S4 で「改版する」に入れていた E-03、O-01〜O-04、T-02〜T-04、B-02・B-03 は、M2 で廃止に改めた（運用ガイドとコード・CI に移したため）。
+- 本書は決定事項と段階の記録として残す。今の作りの細部は、コード・OpenAPI・運用ガイド・改版した D-文書を正とする（M4）。
 
 ## 18. 確認事項（2026-10-25 に出し、2026-10-26 にすべて推奨案で合意。§3.2 の決定事項 1〜13）
 

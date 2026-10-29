@@ -1,0 +1,8 @@
+# aka-vecgen にいない加入者は、取得先が断って拒否（設定: config_stage2.yaml。VECTOR_REJECTED）
+version: 1
+name: reject_source_rejected
+identity: "0440100000000006@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

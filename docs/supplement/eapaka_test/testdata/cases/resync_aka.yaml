@@ -1,0 +1,11 @@
+# EAP-AKA の再同期（設定: config_stage2_resync.yaml。UE の SQN が aka-vecgen より大きいので AUTS を送り、取り直した Challenge で成功する）
+# 再同期が起きたことは、auth のログの EAP_RESYNC_CHALLENGE で確かめる（起きずに成功しても PASS になる）
+version: 1
+name: resync_aka
+identity: "0440100000000001@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: accept
+  mppe:
+    require_present: true
+trace:
+  level: verbose

@@ -8,216 +8,154 @@ x-logging: &fluent-bit-logging
 x-timezone: &timezone
   TZ: Asia/Tokyo
 
+# auth・acct・admin は同じイメージ aka-radius を、サブコマンドを変えて動かす（MVP の設計概要 §4）
+x-aka-radius: &aka-radius
+  image: aka-radius:${RADIUS_VERSION:-dev}
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      # 起動ログの build に出すビルドの版（例: RADIUS_VERSION=$(git rev-parse --short HEAD)）
+      VERSION: ${RADIUS_VERSION:-dev}
+
+# auth・acct・admin に共通の環境変数（Valkey とログ）
+x-radius-common-env: &radius-common-env
+  <<: *timezone
+  RADIUS_VALKEY_HOST: valkey
+  RADIUS_VALKEY_PORT: "6379"
+  RADIUS_VALKEY_PASSWORD: ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
+  RADIUS_LOG_LEVEL: ${RADIUS_LOG_LEVEL:-INFO}
+  RADIUS_LOG_MASK_IMSI: ${RADIUS_LOG_MASK_IMSI:-false}
+
 services:
   # ==========================================================================
   # Logic Layer
   # ==========================================================================
-  auth-server:
-    build:
-      context: ..
-      dockerfile: apps/auth-server/Dockerfile
-      args:
-        # 起動ログの build に出すビルドの版（例: POC_VERSION=$(git rev-parse --short HEAD)）
-        VERSION: ${POC_VERSION:-dev}
+  auth:
+    <<: *aka-radius
+    command: ["auth"]
     ports:
-      - "1812:1812/udp"
+      # 既定はループバックだけ。本番はサービス用の WireGuard のアドレス（エッジのトンネルの IP から受ける）にする（.env の RADIUS_UDP_BIND）
+      - "${RADIUS_UDP_BIND:-127.0.0.1}:1812:1812/udp"
     environment:
-      <<: *timezone
-      REDIS_HOST: valkey
-      REDIS_PORT: "6379"
-      REDIS_PASS: ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
-      VECTOR_API_URL: http://vector-gateway:8080
-      RADIUS_SECRET: ${RADIUS_SECRET:-}
-      LOG_MASK_IMSI: ${LOG_MASK_IMSI:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      valkey:
-        condition: service_healthy
-      vector-gateway:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "pgrep", "-x", "auth-server"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: always
-    logging:
-      <<: *fluent-bit-logging
-      options:
-        fluentd-address: localhost:24224
-        fluentd-async: "true"
-        fluentd-buffer-limit: "1048576"
-        tag: "app.auth-server"
-
-  acct-server:
-    build:
-      context: ..
-      dockerfile: apps/acct-server/Dockerfile
-      args:
-        # 起動ログの build に出すビルドの版（例: POC_VERSION=$(git rev-parse --short HEAD)）
-        VERSION: ${POC_VERSION:-dev}
-    ports:
-      - "1813:1813/udp"
-    environment:
-      <<: *timezone
-      REDIS_HOST: valkey
-      REDIS_PORT: "6379"
-      REDIS_PASS: ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
-      RADIUS_SECRET: ${RADIUS_SECRET:-}
-      LOG_MASK_IMSI: ${LOG_MASK_IMSI:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      valkey:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pgrep", "-x", "acct-server"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: always
-    logging:
-      <<: *fluent-bit-logging
-      options:
-        fluentd-address: localhost:24224
-        fluentd-async: "true"
-        fluentd-buffer-limit: "1048576"
-        tag: "app.acct-server"
-
-  vector-gateway:
-    build:
-      context: ..
-      dockerfile: apps/vector-gateway/Dockerfile
-      args:
-        # 起動ログの build に出すビルドの版（例: POC_VERSION=$(git rev-parse --short HEAD)）
-        VERSION: ${POC_VERSION:-dev}
-    expose:
-      - "8080"
-    environment:
-      <<: *timezone
-      VECTOR_GATEWAY_MODE: ${VECTOR_GATEWAY_MODE:-gateway}
-      VECTOR_GATEWAY_INTERNAL_URL: http://vector-api:8080
-      VECTOR_GATEWAY_PLMN_MAP: ${VECTOR_GATEWAY_PLMN_MAP:-}
-      VECTOR_GATEWAY_INTERNAL_TIMEOUT: ${VECTOR_GATEWAY_INTERNAL_TIMEOUT:-3s}
-      # aka-only-server（接続方式ID:01）。URLが空なら01は無効
-      VECTOR_GATEWAY_AKAONLY_URL: ${VECTOR_GATEWAY_AKAONLY_URL:-}
-      VECTOR_GATEWAY_AKAONLY_CLIENT_CERT: ${VECTOR_GATEWAY_AKAONLY_CLIENT_CERT:-}
-      VECTOR_GATEWAY_AKAONLY_CLIENT_KEY: ${VECTOR_GATEWAY_AKAONLY_CLIENT_KEY:-}
-      VECTOR_GATEWAY_AKAONLY_SERVER_CERT: ${VECTOR_GATEWAY_AKAONLY_SERVER_CERT:-}
-      VECTOR_GATEWAY_AKAONLY_TIMEOUT: ${VECTOR_GATEWAY_AKAONLY_TIMEOUT:-3s}
-      LOG_MASK_IMSI: ${LOG_MASK_IMSI:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      <<: *radius-common-env
+      # 取得先の登録簿（MVP の設計概要 §7.1）。SIGHUP で読み直す: docker compose kill -s HUP auth
+      RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
+      RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
+      RADIUS_EAP_AKA_PRIME_NETWORK_NAME: ${RADIUS_EAP_AKA_PRIME_NETWORK_NAME:-WLAN}
+      # テナントの刻印の Vendor-Specific（エッジの設定と同じ値にする。MVP の設計概要 §8.3）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
+      # 要求 1 つの処理の期限と、同時に処理する要求の上限（MVP の設計概要 §4）
+      RADIUS_REQUEST_TIMEOUT: ${RADIUS_REQUEST_TIMEOUT:-4s}
+      RADIUS_MAX_INFLIGHT: ${RADIUS_MAX_INFLIGHT:-256}
     volumes:
-      # aka-only-server接続用の証明書（av-client.pem / av-server.pem）
-      - ./certs:/certs:ro
-    depends_on:
-      vector-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: always
-    # 停止の上限（10 秒）が Docker の既定の猶予と同じなので、強制終了と重ならないよう長くする
-    stop_grace_period: 20s
-    logging:
-      <<: *fluent-bit-logging
-      options:
-        fluentd-address: localhost:24224
-        fluentd-async: "true"
-        fluentd-buffer-limit: "1048576"
-        tag: "app.vector-gateway"
-
-  vector-api:
-    build:
-      context: ..
-      dockerfile: apps/vector-api/Dockerfile
-      args:
-        # 起動ログの build に出すビルドの版（例: POC_VERSION=$(git rev-parse --short HEAD)）
-        VERSION: ${POC_VERSION:-dev}
-    expose:
-      - "8080"
-    environment:
-      <<: *timezone
-      REDIS_HOST: valkey
-      REDIS_PORT: "6379"
-      REDIS_PASS: ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
-      LOG_MASK_IMSI: ${LOG_MASK_IMSI:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # テストベクターモード（開発・テスト専用。本番では有効にしないこと）
-      TEST_VECTOR_ENABLED: ${TEST_VECTOR_ENABLED:-false}
-      TEST_VECTOR_IMSI_PREFIX: ${TEST_VECTOR_IMSI_PREFIX:-00101}
+      # 取得先の登録簿（sources.json）と、取得先ごとのクライアント証明書・鍵・サーバーの CA（中身は .gitignore 対象）
+      - ./sources:/etc/aka-radius/sources:ro
     depends_on:
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
     restart: always
-    # 停止の上限（10 秒）が Docker の既定の猶予と同じなので、強制終了と重ならないよう長くする
-    stop_grace_period: 20s
     logging:
       <<: *fluent-bit-logging
       options:
         fluentd-address: localhost:24224
         fluentd-async: "true"
         fluentd-buffer-limit: "1048576"
-        tag: "app.vector-api"
+        tag: "app.auth"
+
+  acct:
+    <<: *aka-radius
+    command: ["acct"]
+    ports:
+      # 既定はループバックだけ。本番はサービス用の WireGuard のアドレス（エッジのトンネルの IP から受ける）にする（.env の RADIUS_UDP_BIND）
+      - "${RADIUS_UDP_BIND:-127.0.0.1}:1813:1813/udp"
+    environment:
+      <<: *radius-common-env
+      RADIUS_FALLBACK_SECRET: ${RADIUS_FALLBACK_SECRET:-}
+      RADIUS_REQUEST_TIMEOUT: ${RADIUS_REQUEST_TIMEOUT:-4s}
+      RADIUS_MAX_INFLIGHT: ${RADIUS_MAX_INFLIGHT:-256}
+      # 利用の集計のテナントに使う刻印の Vendor-Specific（auth と同じ値にする。MVP の設計概要 §10.2）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: always
+    logging:
+      <<: *fluent-bit-logging
+      options:
+        fluentd-address: localhost:24224
+        fluentd-async: "true"
+        fluentd-buffer-limit: "1048576"
+        tag: "app.acct"
 
   # ==========================================================================
   # Management Layer
   # ==========================================================================
-  # Provisioning API（D-13）。本PoCの外の BFF から、加入者・RADIUSクライアント・
-  # 認可ポリシーを操作する REST API（HTTPS + mTLS）。証明書の準備が要るため
-  # profile に入れており、既定の `docker compose up` では起動しない。
-  #   docker compose --profile provisioning up -d
-  # 同じホストの BFF（別の compose）は、ホストの 127.0.0.1 に届かないため、
-  # 共有ネットワーク（既定名 eapaka-prov）に参加して https://provisioning-api:9444 で接続する。
-  provisioning-api:
-    build:
-      context: ..
-      dockerfile: apps/provisioning-api/Dockerfile
-      args:
-        # 起動ログの build に出すビルドの版（例: POC_VERSION=$(git rev-parse --short HEAD)）
-        VERSION: ${POC_VERSION:-dev}
-    profiles: ["provisioning"]
+  # 管理API 2.0.0（/admin/v2。MVP の設計概要 §11）。aka-provisioner から加入者（状態・取得先・認可ポリシー）を
+  # 操作する REST API（HTTPS + mTLS）。起動の前に、サーバー証明書（certs/admin/）と管理クライアントのピンのファイル
+  # （secrets/admin-clients）を用意する（README の「起動」）。
+  # 運用のコマンド（client・admin-cert など）もこのコンテナで使う: docker compose exec admin aka-radius client list
+  # 同じホストの呼び出し側（別の compose）は、ホストの 127.0.0.1 に届かないため、
+  # 共有ネットワーク（既定名 aka-radius-admin）に参加して https://aka-radius-admin:9444 で接続する。
+  admin:
+    <<: *aka-radius
+    command: ["admin"]
     ports:
-      # 既定はループバックだけ。別ノードの BFF から使う場合は .env の PROVISIONING_API_BIND を変える
-      - "${PROVISIONING_API_BIND:-127.0.0.1}:9444:9444/tcp"
+      # 既定はループバックだけ。別ノードから使う場合は .env の RADIUS_ADMIN_BIND を変える
+      - "${RADIUS_ADMIN_BIND:-127.0.0.1}:9444:9444/tcp"
+    secrets:
+      - admin-clients
     environment:
-      <<: *timezone
-      REDIS_HOST: valkey
-      REDIS_PORT: "6379"
-      REDIS_PASS: ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
-      PROVISIONING_API_TLS_CERT: /certs/server.pem
-      PROVISIONING_API_TLS_KEY: /certs/server.key
-      # 管理クライアントの「識別名=フィンガープリント」。空なら起動しない
-      PROVISIONING_API_ADMIN_CLIENTS: ${PROVISIONING_API_ADMIN_CLIENTS:-}
-      PROVISIONING_API_NODE_NAME: ${PROVISIONING_API_NODE_NAME:-}
-      # GET /audit-logs で参照できる監査ログ（Valkey の Stream audit:prov）の件数の上限
-      PROVISIONING_API_AUDIT_MAX: ${PROVISIONING_API_AUDIT_MAX:-10000}
-      LOG_MASK_IMSI: ${LOG_MASK_IMSI:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      <<: *radius-common-env
+      RADIUS_ADMIN_TLS_CERT: /certs/server.pem
+      RADIUS_ADMIN_TLS_KEY: /certs/server.key
+      # 管理クライアントのピン（1 行に「識別名=フィンガープリント」）。SIGHUP で読み直す
+      RADIUS_ADMIN_CLIENTS_FILE: /run/secrets/admin-clients
+      RADIUS_ADMIN_NODE_NAME: ${RADIUS_ADMIN_NODE_NAME:-}
+      # 監査ログ: Valkey の Stream（audit。GET /audit-logs）の件数の上限と、日ごとのファイル（audit-YYYYMMDD.jsonl）
+      RADIUS_AUDIT_MAX_LEN: ${RADIUS_AUDIT_MAX_LEN:-10000}
+      RADIUS_AUDIT_DIR: /var/lib/aka-radius/audit
+      RADIUS_AUDIT_RETENTION_DAYS: ${RADIUS_AUDIT_RETENTION_DAYS:-14}
+      # 取得先の登録簿（auth と同じファイル）。加入者の sourceId を確かめ、/status・/sources に出す。鍵は読まない。
+      # 登録簿を直したら docker compose kill -s HUP auth admin で両方に読み直させる
+      RADIUS_SOURCES_FILE: /etc/aka-radius/sources/sources.json
+      # /status に出すテナントの刻印の Vendor-Id と Vendor-Type（auth と同じ値にする）
+      RADIUS_STAMP_VENDOR_ID: ${RADIUS_STAMP_VENDOR_ID:-32473}
+      RADIUS_STAMP_VENDOR_TYPE: ${RADIUS_STAMP_VENDOR_TYPE:-1}
     volumes:
-      # サーバー証明書（server.pem / server.key）。SAN に DNS:provisioning-api を入れる
-      - ./certs/provisioning:/certs:ro
+      # サーバー証明書（server.pem / server.key）。SAN に DNS:aka-radius-admin を入れる。SIGHUP で読み直す
+      - ./certs/admin:/certs:ro
+      - ./sources:/etc/aka-radius/sources:ro
+      # 監査ログの日ごとのファイル。監視用の PC が取りに行く。コンテナは UID 65532 で動くので、この UID で書けるようにする
+      - ./audit:/var/lib/aka-radius/audit
     networks:
-      - default
-      # 同じホストの BFF 用の共有ネットワーク（provisioning-api だけを参加させる）
-      - provisioning-shared
+      default:
+      # 同じホストの呼び出し側用の共有ネットワーク（admin だけを参加させる）
+      admin-shared:
+        aliases:
+          - aka-radius-admin
     depends_on:
       valkey:
         condition: service_healthy
     healthcheck:
-      # /status は mTLS が要るため、プロセスの確認にする。
-      # プロセス名（comm）は15文字までに切り詰められ "provisioning-api" と一致しないため、-x ではなく -f で照合する
-      test: ["CMD", "pgrep", "-f", "/usr/local/bin/provisioning-api"]
+      # ループバックの healthcheck の口（Valkey に届くか。MVP の設計概要 §5）
+      test: ["CMD", "/usr/local/bin/aka-radius", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -231,7 +169,7 @@ services:
         fluentd-address: localhost:24224
         fluentd-async: "true"
         fluentd-buffer-limit: "1048576"
-        tag: "app.provisioning-api"
+        tag: "app.admin"
 
   # ==========================================================================
   # Data Layer
@@ -246,7 +184,7 @@ services:
       valkey-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory 512mb
+      --maxmemory 1gb
       --maxmemory-policy noeviction
       --requirepass ${VALKEY_PASSWORD:?deployments/.env に VALKEY_PASSWORD を設定してください}
     environment:
@@ -289,9 +227,14 @@ services:
 volumes:
   valkey_data:
 
+secrets:
+  # 管理クライアントのピンのファイル（README の「管理クライアント」）
+  admin-clients:
+    file: ./secrets/admin-clients
+
 networks:
-  # 同じホストの BFF と provisioning-api の共有ネットワーク（D-13 §2.2）。
-  # 本 compose が作り、BFF 側は外部ネットワーク（external）として参加する。
-  # provisioning-api を起動したとき（profile provisioning）だけ作られる。
-  provisioning-shared:
-    name: ${PROVISIONING_SHARED_NETWORK:-eapaka-prov}
+  # 同じホストの呼び出し側（aka-provisioner）と admin の共有ネットワーク。
+  # 本 compose が作り、呼び出し側は外部ネットワーク（external）として参加する。
+  # 本番では aka-provisioner は別のノードから WireGuard でつなぐので、同じホストでの試しと CI のためのもの。
+  admin-shared:
+    name: ${RADIUS_ADMIN_SHARED_NETWORK:-aka-radius-admin}

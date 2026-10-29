@@ -1,0 +1,206 @@
+package server
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/google/uuid"
+	"github.com/oyaguma3/aka-radius/internal/auth/eap"
+	radiuspkg "github.com/oyaguma3/aka-radius/internal/auth/radius"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"layeh.com/radius"
+)
+
+// Handler はRADIUSリクエストを処理するハンドラ。
+// layeh.com/radius.Handlerインターフェースの実装。
+type Handler struct {
+	engine eap.EAPProcessor
+	// stampVendorID・stampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（MVP の設計概要 §8.3）
+	stampVendorID   uint32
+	stampVendorType byte
+}
+
+// NewHandler は新しいHandlerを生成する。stampVendorID・stampVendorType はテナントの刻印の Vendor-Specific。
+func NewHandler(engine eap.EAPProcessor, stampVendorID uint32, stampVendorType byte) *Handler {
+	return &Handler{engine: engine, stampVendorID: stampVendorID, stampVendorType: stampVendorType}
+}
+
+// ServeRADIUS はRADIUSリクエストを処理する
+func (h *Handler) ServeRADIUS(w radius.ResponseWriter, r *radius.Request) {
+	traceID := resolveTraceID(r)
+	srcIP := radiussrv.ExtractIP(r.RemoteAddr)
+
+	// Status-Serverは複数のNAS・プロキシ（radsecproxy等）から定期的に届くため、
+	// INFOログが埋まらないよう受信ログはDEBUGとする
+	level := slog.LevelInfo
+	if r.Code == radius.CodeStatusServer {
+		level = slog.LevelDebug
+	}
+	attrs := []any{
+		"event_id", "PKT_RECV",
+		"trace_id", traceID,
+		"src_ip", srcIP,
+		"code", r.Code,
+	}
+	// Access-RequestはNAS-Identifierも出す。radsecproxy等のプロキシ経由ではsrc_ipがプロキシのIPになるため、
+	// NASを識別する手がかりになる（同じ認証のログはtrace_idで追える）
+	if r.Code == radius.CodeAccessRequest {
+		nasID, _ := radiuspkg.GetNASIdentifier(r.Packet)
+		attrs = append(attrs, "nas_identifier", nasID)
+	}
+	slog.Log(context.Background(), level, "RADIUSパケット受信", attrs...)
+
+	switch r.Code {
+	case radius.CodeAccessRequest:
+		h.handleAccessRequest(w, r, traceID, srcIP)
+
+	case radius.CodeStatusServer:
+		h.handleStatusServer(w, r, traceID, srcIP)
+
+	default:
+		slog.Warn("未対応のRADIUS Code",
+			"event_id", "PKT_UNKNOWN_CODE",
+			"trace_id", traceID,
+			"code", r.Code,
+		)
+		// 応答なし
+	}
+}
+
+// resolveTraceID はパケットのTrace IDを決める。
+// 2回目以降のAccess-Request（Access-Challengeへの応答）は、EAPコンテキストのキーである
+// State属性（初回に採番したTrace ID）を引き継ぎ、1回の認証のログを同じtrace_idで追えるようにする。
+// State属性がない、またはUUID形式でない場合は新しいTrace IDを採番する。
+func resolveTraceID(r *radius.Request) string {
+	if r.Code == radius.CodeAccessRequest {
+		if state, ok := radiuspkg.GetState(r.Packet); ok {
+			// エンジンはStateの文字列そのものをコンテキストのキーに使うため、正規化せずにそのまま使う
+			if _, err := uuid.ParseBytes(state); err == nil {
+				return string(state)
+			}
+		}
+	}
+	return uuid.New().String()
+}
+
+// handleAccessRequest はAccess-Requestを処理する
+func (h *Handler) handleAccessRequest(w radius.ResponseWriter, r *radius.Request, traceID, srcIP string) {
+	secret := r.Secret
+
+	// Message-Authenticator検証
+	if !radiussrv.VerifyMessageAuthenticator(r.Packet, secret) {
+		slog.Warn("Message-Authenticator検証失敗",
+			"event_id", "PKT_MA_INVALID",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+		)
+		return // 応答なし
+	}
+
+	// EAP-Message抽出
+	eapMessage, ok := radiuspkg.GetEAPMessage(r.Packet)
+	if !ok {
+		slog.Warn("EAP-Message属性なし",
+			"event_id", "PKT_NO_EAP",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+		)
+		return // 応答なし
+	}
+
+	// RADIUS属性抽出
+	nasID, _ := radiuspkg.GetNASIdentifier(r.Packet)
+	calledStation, _ := radiuspkg.GetCalledStationID(r.Packet)
+	userName, _ := radiuspkg.GetUserName(r.Packet)
+	state, _ := radiuspkg.GetState(r.Packet)
+
+	// ProxyState抽出
+	proxyStates := radiussrv.ExtractProxyStates(r.Packet)
+
+	// EAPリクエスト構築
+	eapReq := &eap.Request{
+		TraceID:       traceID,
+		SrcIP:         srcIP,
+		NASIdentifier: nasID,
+		CalledStation: calledStation,
+		UserName:      userName,
+		State:         state,
+		EAPMessage:    eapMessage,
+		Stamps:        radiussrv.VendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType),
+	}
+
+	// EAPエンジン処理（エンジンは内部エラーをログに記録してRejectに変換するため、常に結果を返す）。
+	// context は受け口（radiussrv.Guard）が付けた要求の期限つき
+	result := h.engine.Process(r.Context(), eapReq)
+
+	// 結果に基づいてRADIUS応答を構築
+	switch result.Action {
+	case eap.ActionAccept:
+		resp := radiuspkg.BuildAccessAccept(r.Packet, secret, &radiuspkg.AcceptParams{
+			EAPMessage:     result.EAPMessage,
+			MSK:            result.MSK,
+			SessionID:      result.SessionID,
+			VlanID:         result.VlanID,
+			SessionTimeout: result.SessionTimeout,
+			ProxyStates:    proxyStates,
+		})
+		if err := w.Write(resp); err != nil {
+			slog.Error("RADIUS応答送信失敗",
+				"event_id", "PKT_SEND_ERR",
+				"trace_id", traceID,
+				"error", err,
+			)
+		}
+
+	case eap.ActionChallenge:
+		resp := radiuspkg.BuildAccessChallenge(r.Packet, secret, &radiuspkg.ChallengeParams{
+			EAPMessage:  result.EAPMessage,
+			State:       result.State,
+			ProxyStates: proxyStates,
+		})
+		if err := w.Write(resp); err != nil {
+			slog.Error("RADIUS応答送信失敗",
+				"event_id", "PKT_SEND_ERR",
+				"trace_id", traceID,
+				"error", err,
+			)
+		}
+
+	case eap.ActionReject:
+		resp := radiuspkg.BuildAccessReject(r.Packet, secret, &radiuspkg.RejectParams{
+			EAPMessage:  result.EAPMessage,
+			ProxyStates: proxyStates,
+		})
+		if err := w.Write(resp); err != nil {
+			slog.Error("RADIUS応答送信失敗",
+				"event_id", "PKT_SEND_ERR",
+				"trace_id", traceID,
+				"error", err,
+			)
+		}
+
+	case eap.ActionDrop:
+		slog.Info("パケットドロップ",
+			"event_id", "PKT_DROP",
+			"trace_id", traceID,
+		)
+		// 応答なし
+	}
+}
+
+// handleStatusServer はStatus-Serverリクエストに応答する。
+// Message-Authenticator検証を行い、失敗時は無応答（破棄）とする。
+func (h *Handler) handleStatusServer(w radius.ResponseWriter, r *radius.Request, traceID, srcIP string) {
+	resp := radiussrv.HandleStatusServer(r.Packet, r.Secret, radius.CodeAccessAccept, "RADIUS_STATUS_AUTH_FAIL", srcIP, traceID)
+	if resp == nil {
+		return // Message-Authenticator検証失敗 → 無応答
+	}
+
+	if err := w.Write(resp); err != nil {
+		slog.Error("Status-Server応答送信失敗",
+			"event_id", "PKT_SEND_ERR",
+			"trace_id", traceID,
+			"error", err,
+		)
+	}
+}

@@ -1,9 +1,9 @@
-# 商用確認済みテストSIM用config
-# IMSI: 999700000165480（参考3: 商用設備確認済みテストAKAデータ）
+# 商用設備で確かめたテストSIM用の設定（IMSI 999700000165480）
+# 鍵は aka-vecgen に登録する（aka-radius には入れない）。エッジの代わり（テナント 42）を通す
 
 radius:
-  server_addr: "127.0.0.1:1812"
-  secret: "TESTSECRET123"
+  server_addr: "127.0.0.1:11812"
+  secret: "ap-secret-0123456789"
   timeout_ms: 3000
   retries: 3
 
@@ -18,7 +18,7 @@ eap:
   outer_identity_update_on_permanent_req: true
   permanent_id_policy: "always"
   aka_prime:
-    net_name: "wlan.mnc070.mcc999.3gppnetwork.org"
+    net_name: "WLAN"
 
 identity:
   realm: "wlan.mnc070.mcc999.3gppnetwork.org"

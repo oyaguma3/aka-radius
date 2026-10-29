@@ -8,13 +8,8 @@ coverage.out
 
 # バイナリ
 *.exe
-apps/admin-tui/admin-tui-linux
-# リポジトリ直下で単一パッケージを go build したときの成果物
-/auth-server
-/acct-server
-/vector-gateway
-/vector-api
-/admin-tui
+# リポジトリ直下で go build ./cmd/aka-radius したときの成果物
+/aka-radius
 
 # IDE
 .vscode/
@@ -31,9 +26,17 @@ docs/testresults/
 # ホスト上のログ出力
 deployments/logs_on_host/*.log
 
-# aka-only-server 接続用の証明書・秘密鍵
+# 管理API のサーバー証明書・秘密鍵
 deployments/certs/*
 !deployments/certs/.gitkeep
+
+# 管理クライアントのピンのファイルと、監査ログの日ごとのファイル
+deployments/secrets/
+deployments/audit/
+
+# 取得先の登録簿と、取得先ごとの証明書・秘密鍵（例のファイルだけ管理する）
+deployments/sources/*
+!deployments/sources/sources.example.json
 
 # Claude Code
 .claude/

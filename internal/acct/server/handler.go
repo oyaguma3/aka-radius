@@ -1,0 +1,123 @@
+package server
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/google/uuid"
+	radiuspkg "github.com/oyaguma3/aka-radius/internal/acct/radius"
+	"github.com/oyaguma3/aka-radius/internal/radiussrv"
+	"layeh.com/radius"
+)
+
+// AccountingProcessor は Accounting-Request を処理する（processor.Processor）。
+// 誤りを返したら応答しない（NAS に送り直させる）。
+type AccountingProcessor interface {
+	Process(ctx context.Context, attrs *radiuspkg.AccountingAttributes, srcIP, traceID string) error
+}
+
+// Handler はRADIUSリクエストを処理するハンドラ。
+type Handler struct {
+	processor AccountingProcessor
+	// stampVendorID・stampVendorType はテナントの刻印の Vendor-Id と Vendor-Type（MVP の設計概要 §8.3）
+	stampVendorID   uint32
+	stampVendorType byte
+}
+
+// NewHandler は新しいHandlerを生成する。stampVendorID・stampVendorType はテナントの刻印の Vendor-Specific。
+func NewHandler(processor AccountingProcessor, stampVendorID uint32, stampVendorType byte) *Handler {
+	return &Handler{processor: processor, stampVendorID: stampVendorID, stampVendorType: stampVendorType}
+}
+
+// ServeRADIUS はRADIUSリクエストを処理する
+func (h *Handler) ServeRADIUS(w radius.ResponseWriter, r *radius.Request) {
+	traceID := uuid.New().String()
+	srcIP := radiussrv.ExtractIP(r.RemoteAddr)
+
+	switch r.Code {
+	case radius.CodeAccountingRequest:
+		h.handleAccountingRequest(w, r, traceID, srcIP)
+
+	case radius.CodeStatusServer:
+		h.handleStatusServer(w, r, traceID, srcIP)
+
+	default:
+		slog.Warn("未対応のRADIUS Code",
+			"event_id", "RADIUS_UNKNOWN_CODE",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+			"code", r.Code,
+		)
+	}
+}
+
+// handleAccountingRequest はAccounting-Requestを処理する
+func (h *Handler) handleAccountingRequest(w radius.ResponseWriter, r *radius.Request, traceID, srcIP string) {
+	secret := r.Secret
+
+	// 1. Request Authenticator検証
+	if !radiuspkg.VerifyAccountingAuthenticator(r.Packet, secret) {
+		slog.Warn("Authenticator検証失敗",
+			"event_id", "RADIUS_AUTH_ERR",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+		)
+		return // パケット破棄
+	}
+
+	// 2. 属性抽出
+	attrs, err := radiuspkg.ExtractAccountingAttributes(r.Packet)
+	if err != nil {
+		slog.Warn("属性抽出失敗",
+			"event_id", "RADIUS_PARSE_ERR",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+			"reason", err.Error(),
+		)
+		return // パケット破棄
+	}
+
+	// 3. Status-Type別処理。記録できなければ（Valkey に書けない）応答せず、NAS に送り直させる。
+	// context は受け口（radiussrv.Guard）が付けた要求の期限つき
+	switch attrs.AcctStatusType {
+	case radiuspkg.AcctStatusTypeStart, radiuspkg.AcctStatusTypeStop, radiuspkg.AcctStatusTypeInterim,
+		radiuspkg.AcctStatusTypeOn, radiuspkg.AcctStatusTypeOff:
+		attrs.Stamps = radiussrv.VendorAttributes(r.Packet, h.stampVendorID, h.stampVendorType)
+		if err := h.processor.Process(r.Context(), attrs, srcIP, traceID); err != nil {
+			return
+		}
+	default:
+		slog.Warn("未対応のAcct-Status-Type",
+			"event_id", "RADIUS_UNKNOWN_CODE",
+			"trace_id", traceID,
+			"src_ip", srcIP,
+			"acct_status_type", attrs.AcctStatusType,
+		)
+		return // パケット破棄
+	}
+
+	// 4. Accounting-Response生成・送信
+	response := radiuspkg.BuildAccountingResponse(r.Packet, attrs.ProxyStates)
+	if err := w.Write(response); err != nil {
+		slog.Error("RADIUS応答送信失敗",
+			"event_id", "PKT_SEND_ERR",
+			"trace_id", traceID,
+			"error", err,
+		)
+	}
+}
+
+// handleStatusServer はStatus-Serverリクエストに応答する
+func (h *Handler) handleStatusServer(w radius.ResponseWriter, r *radius.Request, traceID, srcIP string) {
+	resp := radiussrv.HandleStatusServer(r.Packet, r.Secret, radius.CodeAccountingResponse, "RADIUS_AUTH_ERR", srcIP, traceID)
+	if resp == nil {
+		return
+	}
+	if err := w.Write(resp); err != nil {
+		slog.Error("Status-Server応答送信失敗",
+			"event_id", "PKT_SEND_ERR",
+			"trace_id", traceID,
+			"error", err,
+		)
+	}
+}

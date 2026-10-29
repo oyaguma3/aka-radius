@@ -26,7 +26,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.work
+          go-version-file: go.mod
           cache: true
 
       - name: Format
@@ -49,7 +49,6 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
-          args: ./pkg/... ./apps/auth-server/... ./apps/acct-server/... ./apps/vector-gateway/... ./apps/vector-api/... ./apps/provisioning-api/... ./apps/admin-tui/...
 
       - name: Test
         run: make test-race
@@ -63,21 +62,101 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # auth・acct・admin は同じイメージ（サブコマンドで切り替える）
       - name: イメージのビルド
         run: |
-          for app in auth-server acct-server vector-gateway vector-api provisioning-api; do
-            echo "::group::$app"
-            docker build -f "apps/$app/Dockerfile" -t "aka-radius-$app:ci" .
-            echo "::endgroup::"
-          done
+          docker build -t aka-radius:ci .
+          # サブコマンドなしでは使い方を出して終了コード 2 で終わる
+          set +e
+          docker run --rm aka-radius:ci
+          code=$?
+          set -e
+          test "$code" -eq 2
 
       - name: compose の設定
         working-directory: deployments
         run: |
           cp .env.example .env
           docker compose -f docker-compose.yml config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile provisioning config -q
-          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml --profile provisioning config --services
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.aka-av.yml config --services
           # VALKEY_PASSWORD が空なら、compose が断る。
           sed -i 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=|' .env
           ! docker compose -f docker-compose.yml config -q 2>/dev/null
+
+  compose:
+    name: README の手順の通し確認
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: deployments
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 準備（取得先の登録簿、管理クライアントのピン、サーバー証明書）
+        run: |
+          cp .env.example .env
+          sed -i 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=ci-valkey-password|' .env
+          mkdir -p sources certs/admin secrets audit backups
+          # 取得先はこの試しでは呼ばない（auth は起動のときに証明書と鍵と CA を読むだけ）
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=aka-radius \
+            -addext extendedKeyUsage=clientAuth -keyout sources/vecgen-client.key -out sources/vecgen-client.pem 2>/dev/null
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=aka-vecgen \
+            -keyout "$RUNNER_TEMP/av-server.key" -out sources/vecgen-av-server.pem 2>/dev/null
+          cp sources/sources.example.json sources/sources.json
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=provisioner \
+            -addext extendedKeyUsage=clientAuth -keyout "$RUNNER_TEMP/prov.key" -out "$RUNNER_TEMP/prov.pem" 2>/dev/null
+          docker compose build -q
+          # ピンのファイルは admin のコンテナを動かす前に作る（ないと Docker が同じ名前のディレクトリを作る）
+          touch secrets/admin-clients
+          echo "provisioner=$(docker compose run --rm --no-deps -T admin fingerprint < "$RUNNER_TEMP/prov.pem")" > secrets/admin-clients
+          sudo chown -R 65532:65532 sources certs/admin secrets/admin-clients audit
+          sudo chmod 600 sources/vecgen-client.key secrets/admin-clients
+          docker compose run --rm --no-deps -v ./certs/admin:/out admin admin-cert create -hosts aka-radius-admin,localhost,127.0.0.1 -out /out
+
+      - name: 起動と healthcheck
+        run: |
+          docker compose up -d --wait --wait-timeout 120
+          docker compose ps
+          for s in auth acct admin; do docker compose exec -T "$s" aka-radius healthcheck; done
+
+      - name: 管理API とコマンド
+        run: |
+          A="curl -sS --fail-with-body --cacert certs/admin/server.pem --cert $RUNNER_TEMP/prov.pem --key $RUNNER_TEMP/prov.key -H X-Operator-Id:ci"
+          $A https://localhost:9444/admin/v2/status | jq -e '.version == "2.0.0" and .adminClients == ["provisioner"] and (.sources | length == 1)'
+          docker compose exec -T admin aka-radius client add -ip 10.10.0.11 -name edge-01 -trust-stamp true -generate
+          $A https://localhost:9444/admin/v2/clients | jq -e '.items == [.items[0]] and .items[0].ip == "10.10.0.11" and .items[0].trustStamp'
+          $A https://localhost:9444/admin/v2/sources | jq -e '.items[0].id == "vecgen" and (.items[0].clientCertificate.fingerprint | length == 64)'
+          $A -X POST -H Content-Type:application/json https://localhost:9444/admin/v2/subscribers \
+            -d '{"imsi":"440100123456789","state":"active","sourceId":"vecgen","rules":[{"tenantId":42,"nasId":"*","ssids":["*"]}]}'
+          # 登録していない管理クライアントは TLS のハンドシェイクで断る
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=stranger \
+            -keyout "$RUNNER_TEMP/stranger.key" -out "$RUNNER_TEMP/stranger.pem" 2>/dev/null
+          if curl -sS --cacert certs/admin/server.pem --cert "$RUNNER_TEMP/stranger.pem" --key "$RUNNER_TEMP/stranger.key" https://localhost:9444/admin/v2/status; then
+            echo "登録していない管理クライアントが接続できてしまいました"
+            exit 1
+          fi
+
+      - name: Valkey のバックアップと戻し
+        run: |
+          A="curl -sS --cacert certs/admin/server.pem --cert $RUNNER_TEMP/prov.pem --key $RUNNER_TEMP/prov.key"
+          ../scripts/backup-valkey.sh backups/valkey.rdb
+          # 写しの後に足した加入者は、戻すと消える
+          $A --fail-with-body -X POST -H Content-Type:application/json https://localhost:9444/admin/v2/subscribers \
+            -d '{"imsi":"440100123456780","state":"active","sourceId":"vecgen","rules":[{"tenantId":42,"nasId":"*","ssids":["*"]}]}'
+          ../scripts/restore-valkey.sh backups/valkey.rdb
+          docker compose up -d --wait --wait-timeout 120
+          test "$($A -o /dev/null -w '%{http_code}' --retry 10 --retry-delay 2 --retry-all-errors https://localhost:9444/admin/v2/subscribers/440100123456780)" = 404
+          $A --fail-with-body https://localhost:9444/admin/v2/subscribers/440100123456789 | jq -e '.state == "active"'
+          $A --fail-with-body https://localhost:9444/admin/v2/clients | jq -e '.items | length == 1'
+
+      - name: 監査ログの日ごとのファイル
+        run: |
+          sudo cat audit/audit-*.jsonl | jq -s -e 'map(.action) | index("admin-server-certificate.create") != null and index("client.create") != null and index("subscriber.create") != null'
+
+      - name: ログ（失敗時）
+        if: failure()
+        run: docker compose logs --no-color

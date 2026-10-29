@@ -1,0 +1,37 @@
+# エッジの代わり（テナント 42。aka-mvpset の verify/stage2 の edge-t42）を通す設定
+# IMSI 440100000000001（S-01 の 3.2 の A）。成功・拒否のケースで使う
+# 鍵は 3GPP TS 35.208 の試験セット 1（aka-vecgen に同じ Ki・OPc で登録する）。aka-radius には鍵を入れない。
+
+radius:
+  server_addr: "127.0.0.1:11812"
+  secret: "ap-secret-0123456789"
+  timeout_ms: 6000
+  retries: 1
+
+radius_attrs:
+  nas_ip_address: "192.0.2.10"
+  nas_identifier: "ap-01"
+  called_station_id: "00-11-22-33-44-55:ssid1"
+  calling_station_id: "02-00-00-00-00-01"
+
+eap:
+  method_mismatch_policy: "warn"
+  outer_identity_update_on_permanent_req: true
+  permanent_id_policy: "always"
+  aka_prime:
+    # aka-radius が AT_KDF_INPUT で送る値（RADIUS_EAP_AKA_PRIME_NETWORK_NAME。既定 WLAN）が優先される
+    net_name: "WLAN"
+
+identity:
+  realm: "wlan.mnc010.mcc440.3gppnetwork.org"
+
+sim:
+  imsi: "440100000000001"
+  ki: "465b5ce8b199b49faa5f0a2ee238a6bc"
+  opc: "cd63cb71954a9f4e48a5994e37a02baf"
+  amf: "8000"
+  sqn_initial_hex: "000000000000"
+
+sqn_store:
+  mode: "file"
+  path: "/tmp/eapaka_test-sqn-stage2.json"
