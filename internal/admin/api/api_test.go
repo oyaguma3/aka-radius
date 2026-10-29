@@ -438,6 +438,9 @@ func TestUsage(t *testing.T) {
 	a := newTestAPI(t)
 	us := usage.NewStore(a.rdb)
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, usage.JST)
+	// 期限（EXPIREAT）を固定の時刻で付けるので、miniredis の時計も同じ時刻に合わせる
+	// （合わせないと、実際の日付が進むと書いたキーがすぐに期限切れになる）。
+	a.mr.SetTime(now)
 	for _, imsi := range []string{"440100000000002", "440100000000001"} {
 		if err := us.AddAuthOK(t.Context(), now, 42, imsi); err != nil {
 			t.Fatal(err)
