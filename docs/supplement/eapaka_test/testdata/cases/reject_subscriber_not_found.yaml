@@ -1,0 +1,8 @@
+# aka-radius にいない加入者は拒否（設定: config_stage2.yaml。AUTH_SUBSCRIBER_NOT_FOUND。aka-vecgen にはいても取得先を呼ばない）
+version: 1
+name: reject_subscriber_not_found
+identity: "0440100000000005@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

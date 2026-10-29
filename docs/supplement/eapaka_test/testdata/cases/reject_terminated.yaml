@@ -1,0 +1,8 @@
+# terminated の加入者は拒否（設定: config_stage2.yaml。AUTH_SUBSCRIBER_TERMINATED。取得先を呼ばない）
+version: 1
+name: reject_terminated
+identity: "0440100000000004@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

@@ -1,6 +1,7 @@
+# サンプルの設定（eapaka_test の example.yaml をもとに、エッジの代わり（テナント 42）を通すようにしたもの）
 radius:
-  server_addr: "127.0.0.1:1812"
-  secret: "testing123"
+  server_addr: "127.0.0.1:11812"
+  secret: "ap-secret-0123456789"
   timeout_ms: 1000
   retries: 3
 
@@ -15,7 +16,7 @@ eap:
   outer_identity_update_on_permanent_req: true
   permanent_id_policy: "always"
   aka_prime:
-    net_name: "wlan.mnc010.mcc440.3gppnetwork.org"
+    net_name: "WLAN"
 
 identity:
   realm: "wlan.mnc010.mcc440.3gppnetwork.org"

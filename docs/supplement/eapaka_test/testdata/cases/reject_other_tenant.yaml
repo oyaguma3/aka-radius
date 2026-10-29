@@ -1,0 +1,8 @@
+# 別のテナント（7）のエッジからは拒否（設定: config_stage2_t7.yaml。AUTH_POLICY_DENIED。加入者 A のルールはテナント 42 だけ）
+version: 1
+name: reject_other_tenant
+identity: "0440100000000001@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

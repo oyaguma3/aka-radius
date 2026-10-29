@@ -1,0 +1,8 @@
+# inactive の加入者は拒否（設定: config_stage2.yaml。AUTH_SUBSCRIBER_INACTIVE。取得先を呼ばない）
+version: 1
+name: reject_inactive
+identity: "0440100000000003@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

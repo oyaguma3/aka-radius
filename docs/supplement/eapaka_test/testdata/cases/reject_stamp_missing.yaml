@@ -1,0 +1,8 @@
+# エッジを通さない（刻印のない）要求は拒否（設定: config_direct.yaml。AUTH_STAMP_MISSING）
+version: 1
+name: reject_stamp_missing
+identity: "0440100000000001@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: reject
+trace:
+  level: verbose

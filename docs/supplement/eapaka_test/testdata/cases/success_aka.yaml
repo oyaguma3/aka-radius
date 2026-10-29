@@ -1,0 +1,10 @@
+# EAP-AKA の成功（設定: config_stage2.yaml。加入者 A は aka-radius で active、テナント 42 のルール）
+version: 1
+name: success_aka
+identity: "0440100000000001@wlan.mnc010.mcc440.3gppnetwork.org"
+expect:
+  result: accept
+  mppe:
+    require_present: true
+trace:
+  level: verbose
