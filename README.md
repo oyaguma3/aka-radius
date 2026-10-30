@@ -5,7 +5,7 @@
 
 このリポジトリは、VPS に分けて置いて顧客を収容する **MVP セット**（[aka-mvpset](https://github.com/oyaguma3/aka-mvpset)）の RADIUS サーバーのノードです。PoC セット（[eapaka-pocset](https://github.com/oyaguma3/eapaka-pocset) の `pocset-v1.0.1`）の [eapaka-radius-server-poc](https://github.com/oyaguma3/eapaka-radius-server-poc) の履歴を引き継いで作りました（もとのコミット `main` の `1f8aad1`、`develop` の `86e05a9`）。
 
-MVP のための改修は、[設計概要](docs/design-overview.md)（決定事項と段階の記録）のとおりに MVP セットの段階 2 で行いました（2-1〜2-6）。運用は[運用ガイド](docs/operation-guide.md)、細かい仕様は D-文書（[ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r70.md)）、管理API は [OpenAPI](docs/openapi/admin-api.yaml) にあります。
+MVP のための改修は、[設計概要](docs/design-overview.md)（決定事項と段階の記録）のとおりに MVP セットの段階 2 で行いました（2-1〜2-6）。運用は[運用ガイド](docs/operation-guide.md)、細かい仕様は D-文書（[ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r71.md)）、管理API は [OpenAPI](docs/openapi/admin-api.yaml) にあります。
 
 ## 概要
 
@@ -255,7 +255,7 @@ go test ./internal/auth/...
 |---|---|
 | [運用ガイド](docs/operation-guide.md) | 導入、aka-vecgen とつなぐ、エッジ、管理API、加入者と認可、証明書、公開範囲、ログと監査ログ、バックアップ、障害時の確かめ |
 | [設計概要](docs/design-overview.md) | MVP の決定事項と、段階 2 の各手順で決めたことの記録 |
-| [ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r70.md) | D-文書（設計・ログ・エラー処理・インフラ・各サーバーの詳細設計など）と、廃止した文書 |
+| [ドキュメント一覧](docs/aka-radius_ドキュメント一覧_r71.md) | D-文書（設計・ログ・エラー処理・インフラ・各サーバーの詳細設計など）と、廃止した文書 |
 | [管理API（OpenAPI）](docs/openapi/admin-api.yaml) | 管理API 2.0.0 |
 
 ## ライセンス

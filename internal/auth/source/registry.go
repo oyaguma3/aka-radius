@@ -1,12 +1,11 @@
 package source
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -213,14 +212,10 @@ func readFile(path string) (*fileFormat, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read sources file: %w", err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
+	// Unmarshal は 1 つの値の後ろに続くデータも誤りにする。
 	var f fileFormat
-	if err := dec.Decode(&f); err != nil {
+	if err := json.Unmarshal(data, &f, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parse sources file: %w", err)
-	}
-	if dec.More() {
-		return nil, errors.New("parse sources file: trailing data")
 	}
 	return &f, nil
 }

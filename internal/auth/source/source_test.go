@@ -343,7 +343,7 @@ func TestLoadRegistry_Errors(t *testing.T) {
 		want string
 	}{
 		{"JSON でない", `{`, "parse sources file"},
-		{"知らない項目", `{"sources":[` + entry(map[string]string{"extra": `1`}) + `]}`, "unknown field"},
+		{"知らない項目", `{"sources":[` + entry(map[string]string{"extra": `1`}) + `]}`, "unknown object member name"},
 		{"ID の形", `{"sources":[` + entry(map[string]string{"id": `"Vec_Gen"`}) + `]}`, "id must be"},
 		{"平文の HTTP", `{"sources":[` + entry(map[string]string{"baseUrl": `"http://127.0.0.1:1/nudm-ueau/v1"`}) + `]}`, "baseUrl must be https"},
 		{"パスの終わり", `{"sources":[` + entry(map[string]string{"baseUrl": `"https://127.0.0.1:1/api/v1"`}) + `]}`, "must end with /nudm-ueau/v1"},

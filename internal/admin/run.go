@@ -89,7 +89,7 @@ func Main(build string) {
 	// 4. Valkey接続
 	rdb, err := valkey.NewClient(valkey.DefaultOptions().WithAddr(cfg.ValkeyAddr()).WithPassword(cfg.ValkeyPassword))
 	if err != nil {
-		log.Error("failed to connect to Valkey", "addr", cfg.ValkeyAddr(), "error", err)
+		log.Error("failed to connect to Valkey", "event_id", "VALKEY_CONN_ERR", "addr", cfg.ValkeyAddr(), "error", err)
 		os.Exit(1)
 	}
 	defer func() { _ = rdb.Close() }()

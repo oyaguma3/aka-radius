@@ -34,11 +34,11 @@
                 "kind": "integer",
                 "identifier": true
             },
-            "src_ip": {
+            "tenant_source": {
                 "kind": "string",
                 "identifier": true
             },
-            "client_ip": {
+            "src_ip": {
                 "kind": "string",
                 "identifier": true
             },
@@ -46,9 +46,16 @@
                 "kind": "string",
                 "identifier": true
             },
+            "acct_session_id": {
+                "kind": "string",
+                "identifier": true
+            },
             "cause": {
                 "kind": "string",
                 "identifier": true
+            },
+            "reason": {
+                "kind": "string"
             },
             "nas_identifier": {
                 "kind": "string",
@@ -73,10 +80,16 @@
             "latency_ms": {
                 "kind": "integer"
             },
-            "input_octets": {
+            "rule_index": {
                 "kind": "integer"
             },
-            "output_octets": {
+            "delta_seconds": {
+                "kind": "integer"
+            },
+            "delta_in_octets": {
+                "kind": "integer"
+            },
+            "delta_out_octets": {
                 "kind": "integer"
             },
             "code": {
@@ -91,16 +104,7 @@
             "acct_status_type": {
                 "kind": "integer"
             },
-            "session_time": {
-                "kind": "integer"
-            },
-            "failure_count": {
-                "kind": "integer"
-            },
             "resync_count": {
-                "kind": "integer"
-            },
-            "attempt": {
                 "kind": "integer"
             },
             "http_status": {
