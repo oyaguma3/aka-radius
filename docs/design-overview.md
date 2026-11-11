@@ -9,7 +9,7 @@
   - 認証ベクターAPI の契約（以下「契約」）: [av-api-contract.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)。とくに §16.2（aka-radius の改修 R1〜R7）
   - 課金レコード: [charging-records.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/charging-records.md) §5.2・§8.1（利用の集計）
   - aka-vecgen の設計概要: aka-vecgen の [`docs/design-overview.md`](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/design-overview.md)（状態の値と口、管理クライアントのピン、監査ログの書き出しをそろえる）
-  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r71.md)）
+  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r72.md)）
 
 ## 1. 位置づけ
 
@@ -71,7 +71,7 @@
 
 ## 4. 技術方針
 
-- 言語は Go 1.27.3。Go Workspace の 7 つのモジュールを、1 つのモジュール `github.com/oyaguma3/aka-radius` にまとめる。コマンドは 1 つ（`aka-radius`）で、サブコマンド `auth`・`acct`・`admin` をそれぞれ別のコンテナで動かす（同じイメージ。§18 の C1）。
+- 言語は Go 1.27.4。Go Workspace の 7 つのモジュールを、1 つのモジュール `github.com/oyaguma3/aka-radius` にまとめる。コマンドは 1 つ（`aka-radius`）で、サブコマンド `auth`・`acct`・`admin` をそれぞれ別のコンテナで動かす（同じイメージ。§18 の C1）。
 - 環境変数の接頭辞は `RADIUS_`（§18 の C1）。
 - 外部依存: `layeh.com/radius`、`github.com/oyaguma3/go-eapaka`、`github.com/redis/go-redis/v9`、`github.com/sony/gobreaker`、`github.com/google/uuid`。Gin（管理API・vector-gateway・vector-api・`pkg/httputil`）、resty（`net/http` に置き換える）、tview・tcell（Admin-TUI）、`wmnsk/milenage`（vector-api）は外す。
 - HTTP は `net/http` のメソッドつき ServeMux、JSON は `encoding/json/v2`、ログは `log/slog`。
