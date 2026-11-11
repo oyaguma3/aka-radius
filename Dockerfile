@@ -2,7 +2,7 @@
 # （compose の command でサブコマンドを渡す）。運用のコマンド（client・sources・admin-cert など）も同じバイナリ。
 
 # ビルドステージ
-FROM golang:1.27.3-bookworm AS builder
+FROM golang:1.27.4-bookworm AS builder
 
 WORKDIR /src
 
