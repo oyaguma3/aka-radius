@@ -9,7 +9,7 @@
   - 認証ベクターAPI の契約（以下「契約」）: [av-api-contract.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)。とくに §16.2（aka-radius の改修 R1〜R7）
   - 課金レコード: [charging-records.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/charging-records.md) §5.2・§8.1（利用の集計）
   - aka-vecgen の設計概要: aka-vecgen の [`docs/design-overview.md`](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/design-overview.md)（状態の値と口、管理クライアントのピン、監査ログの書き出しをそろえる）
-  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r72.md)）
+  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r73.md)）
 
 ## 1. 位置づけ
 
