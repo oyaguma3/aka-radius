@@ -143,7 +143,14 @@ jobs:
       - name: Valkey のバックアップと戻し
         run: |
           A="curl -sS --cacert certs/admin/server.pem --cert $RUNNER_TEMP/prov.pem --key $RUNNER_TEMP/prov.key"
+          v() { docker compose exec -T valkey valkey-cli "$@"; }
+          # スナップショットを 1 鍵 0.1 秒遅らせて書き終わるまでの時間を延ばし、書き終わる前に写す誤り（前のスナップショットを写す）を
+          # 表に出す（aka-mvpset の段階 6 の B6-1）。試験のためだけの設定で、戻すときの起動で消える。写しの直前に書いた印が戻ることを確かめる
+          v CONFIG SET rdb-key-save-delay 100000
+          for i in $(seq 1 20); do v SET "ci:pad:$i" x > /dev/null; done
+          v SET ci:marker before
           ../scripts/backup-valkey.sh backups/valkey.rdb
+          v CONFIG SET rdb-key-save-delay 0
           # 写しの後に足した加入者は、戻すと消える
           $A --fail-with-body -X POST -H Content-Type:application/json https://localhost:9444/admin/v2/subscribers \
             -d '{"imsi":"440100123456780","state":"active","sourceId":"vecgen","rules":[{"tenantId":42,"nasId":"*","ssids":["*"]}]}'
@@ -151,6 +158,7 @@ jobs:
           docker compose up -d --wait --wait-timeout 120
           test "$($A -o /dev/null -w '%{http_code}' --retry 10 --retry-delay 2 --retry-all-errors https://localhost:9444/admin/v2/subscribers/440100123456780)" = 404
           $A --fail-with-body https://localhost:9444/admin/v2/subscribers/440100123456789 | jq -e '.state == "active"'
+          test "$(v GET ci:marker)" = before
           $A --fail-with-body https://localhost:9444/admin/v2/clients | jq -e '.items | length == 1'
 
       - name: 監査ログの日ごとのファイル
