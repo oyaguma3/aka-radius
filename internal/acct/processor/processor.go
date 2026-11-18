@@ -144,7 +144,12 @@ func (p *Processor) logResult(log *slog.Logger, kind store.Kind, a *radius.Accou
 	if res.Sequence != "" {
 		log.Warn("accounting sequence error", "event_id", "ACCT_SEQUENCE_ERR", "reason", res.Sequence, "imsi", imsi)
 	}
-	if !res.SessionFound {
+	switch {
+	case res.SessionResumed:
+		// Access-Accept を経ないつなぎ直し（PMKSA のキャッシュなど）で、Class のセッションが消えていた（段階 6-5 の C6-4）。
+		log.Info("session resumed from the Class (no session found)", "event_id", "ACCT_SESSION_RESUMED", "class_uuid", a.ClassUUID, "imsi", imsi,
+			"tenant_id", res.TenantID)
+	case !res.SessionFound:
 		log.Warn("session not found (usage only)", "event_id", "ACCT_SESSION_NOT_FOUND", "class_uuid", a.ClassUUID, "imsi", imsi)
 	}
 	if res.CounterReset {

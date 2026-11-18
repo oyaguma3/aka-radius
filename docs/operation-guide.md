@@ -1,7 +1,7 @@
 # 運用ガイド
 
 - 対象: aka-radius を MVP セットのデータ面の VPS で動かす人。
-- 関連: [README](../README.md)（起動と基本操作、コマンドと設定の一覧）、[設計概要](design-overview.md)（決定事項と段階の記録）、[管理API](openapi/admin-api.yaml)、[認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)（aka-mvpset）、aka-vecgen の[運用ガイド](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/operation-guide.md)。細かい仕様は D-文書（[ドキュメント一覧](aka-radius_ドキュメント一覧_r73.md)）にある。
+- 関連: [README](../README.md)（起動と基本操作、コマンドと設定の一覧）、[設計概要](design-overview.md)（決定事項と段階の記録）、[管理API](openapi/admin-api.yaml)、[認証ベクターAPI の契約](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)（aka-mvpset）、aka-vecgen の[運用ガイド](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/operation-guide.md)。細かい仕様は D-文書（[ドキュメント一覧](aka-radius_ドキュメント一覧_r74.md)）にある。
 
 ## 1. 構成と置き場所
 
@@ -80,6 +80,7 @@ auth は、加入者の `sourceId` が指す取得先から認証ベクターを
 
 - `GET /admin/v2/sources` の `clientCertificate.fingerprint` を、aka-vecgen の AV クライアントのフィンガープリントと突き合わせられる。
 - 登録簿を直したら `docker compose kill -s HUP auth admin` で読み直す（ログの `SOURCES_RELOADED`）。読めない・形が違うときは前の登録簿のまま続ける（`SOURCES_RELOAD_ERR`）。
+- `docker compose kill -s HUP` を送ったコンテナには Docker が「手で止めた」の印を付けるので、ホストを再起動すると `unless-stopped` でも起き上がらない（aka-mvpset の段階 5 の T5-15）。送った後に `docker compose up -d auth admin`（送ったサービス）を一度流して印を消す（動いているコンテナは作り直されない）。aka-mvpset の配置では、起動のときに `aka-compose-up.service` が起こし直す。この後の章の `SIGHUP` も同じ。
 - 加入者が指している取得先（`/status` の `sources[].subscriberCount` が 0 でない）を消す読み直しは断る（`SOURCES_RELOAD_ERR`）。先に加入者の `sourceId` を変えるか、加入者を消す。
 - 取得先ごとに遮断器を持つ。一時的な誤り（タイムアウト、5xx、契約に合わない応答）が 5 回続くと開き、30 秒で半開きにして 3 回通し、成功すれば閉じる。加入者がいない・止めてあるなどの拒否（403）は数えない。状態は `/status`・`/sources` の `circuitBreaker` に出る（auth が状態の変わったときと 30 秒ごとに報告する。`reportedAt` が 1 分より古ければ auth が止まっているか、Valkey に書けていない）。
 - 要求 1 回のタイムアウトは取得先ごとに `timeout`（既定 3 秒）で、再試行はしない。EAP の会話全体の期限は `RADIUS_REQUEST_TIMEOUT`（既定 4 秒）。
@@ -170,7 +171,7 @@ auth は最初の要求（IMSI が分かった時点）で、認証ベクター�
 
 ### 6.3 Accounting と利用の集計
 
-acct は Accounting-Request（Start・Interim・Stop）ごとに、重複の判定・前回の累計からの増分・利用の集計への足し込み・セッションの更新を 1 つの Lua で行う（Gigawords と Event-Timestamp を扱う。詳しくは D-10）。テナントは信頼する送信元の刻印から決め、分からなければ `0` で集計する（`ACCT_TENANT_UNKNOWN`）。IMSI が分からなければ集計しない（`ACCT_IMSI_UNKNOWN`）。Valkey に書けないときは Accounting-Response を返さない（NAS に送り直させて、集計の取りこぼしを防ぐ）。集計は日本時間の日ごとに 8 日持ち、aka-ossbss が `GET /admin/v2/usage?date=YYYY-MM-DD` で毎日取り出す。
+acct は Accounting-Request（Start・Interim・Stop）ごとに、重複の判定・前回の累計からの増分・利用の集計への足し込み・セッションの更新を 1 つの Lua で行う（Gigawords と Event-Timestamp を扱う。詳しくは D-10）。テナントは信頼する送信元の刻印から決め、分からなければ `0` で集計する（`ACCT_TENANT_UNKNOWN`）。IMSI が分からなければ集計しない（`ACCT_IMSI_UNKNOWN`）。Valkey に書けないときは Accounting-Response を返さない（NAS に送り直させて、集計の取りこぼしを防ぐ）。Class のセッションがない Start・Interim（端末が PMKSA のキャッシュでつなぎ直したときなど、Access-Accept を経ないとき）は、IMSI が分かればセッションを作り直す（`ACCT_SESSION_RESUMED`、INFO。作り直せなければ `ACCT_SESSION_NOT_FOUND`、WARN。どちらも集計には入る）。集計は日本時間の日ごとに 8 日持ち、aka-ossbss が `GET /admin/v2/usage?date=YYYY-MM-DD` で毎日取り出す。
 
 ## 7. 証明書
 

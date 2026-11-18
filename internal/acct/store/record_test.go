@@ -212,3 +212,68 @@ func TestSeenKey(t *testing.T) {
 		t.Error(k)
 	}
 }
+
+// Class のセッションがないとき（Access-Accept を経ないつなぎ直し、期限切れなど）、Start・Interim で IMSI が分かればセッションを作り直す
+// （段階 6-5 の C6-4）。開始の時刻は今から Acct-Session-Time を引いた時刻。Stop と IMSI が分からないときは作らない。
+func TestAccount_SessionResumed(t *testing.T) {
+	e := newRecEnv(t)
+	ctx := t.Context()
+	r := e.rec(KindInterim, 600, 1000, 2000)
+	r.SessionID, r.UserNameIMSI, r.CallingStationID = "s9", testIMSI, "00-11-22-33-44-55"
+	res := e.account(t, r)
+	if res.SessionFound || !res.SessionResumed || res.IMSI != testIMSI || res.TenantID != 42 || res.Seconds != 600 {
+		t.Fatalf("resume = %+v", res)
+	}
+	got, _, err := e.sess.ListByTenant(ctx, 42, 0, 10, e.now)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("sessions = %+v %v", got, err)
+	}
+	s := got[0]
+	if s.ID != "s9" || s.IMSI != testIMSI || s.TenantID != 42 || s.CallingStationID != "00-11-22-33-44-55" || s.AcctSessionID != "acct-1" ||
+		s.Seconds != 600 || s.StartTime.Unix() != e.now.Add(-600*time.Second).Unix() || s.ExpiresAt.Unix() != e.now.Add(sessions.TTL).Unix() {
+		t.Errorf("resumed session = %+v", s)
+	}
+	if byIMSI, _, err := e.sess.ListByIMSIs(ctx, []string{testIMSI}, 0, 10, e.now); err != nil || len(byIMSI) != 1 {
+		t.Errorf("IMSI index = %+v %v", byIMSI, err)
+	}
+	// 次の Interim は、作り直したセッションを更新する（作り直さない。開始の時刻は変えない）。
+	r.Seconds, r.Now = 1200, e.now.Add(10*time.Minute)
+	if res = e.account(t, r); !res.SessionFound || res.SessionResumed || res.Seconds != 600 {
+		t.Fatalf("next interim = %+v", res)
+	}
+	if got, _, _ = e.sess.ListByTenant(ctx, 42, 0, 10, e.now); len(got) != 1 || got[0].StartTime.Unix() != e.now.Add(-600*time.Second).Unix() || got[0].Seconds != 1200 {
+		t.Errorf("session after the next interim = %+v", got)
+	}
+	// Stop で消す。
+	r.Kind, r.Seconds = KindStop, 1500
+	if res = e.account(t, r); !res.SessionFound || res.SessionResumed || e.mr.Exists(sessions.Key("s9")) {
+		t.Fatalf("stop = %+v", res)
+	}
+	// Stop でセッションがなければ作らない。
+	r = e.rec(KindStop, 30, 0, 0)
+	r.SeenKey, r.SessionID, r.UserNameIMSI = SeenKey("192.0.2.1", "ap-1", "acct-2"), "s10", testIMSI
+	if res = e.account(t, r); res.SessionFound || res.SessionResumed || e.mr.Exists(sessions.Key("s10")) {
+		t.Fatalf("stop without a session = %+v", res)
+	}
+	// IMSI が分からなければ作らない（匿名の User-Name で、重複の判定のキーにも IMSI がない）。
+	r = e.rec(KindStart, 0, 0, 0)
+	r.SeenKey, r.SessionID = SeenKey("192.0.2.1", "ap-1", "acct-3"), "s11"
+	if res = e.account(t, r); res.SessionFound || res.SessionResumed || e.mr.Exists(sessions.Key("s11")) {
+		t.Fatalf("start without an IMSI = %+v", res)
+	}
+	// Class がなければ作らない（作るキーがない）。
+	r = e.rec(KindStart, 0, 0, 0)
+	r.SeenKey, r.UserNameIMSI = SeenKey("192.0.2.1", "ap-1", "acct-4"), testIMSI
+	if res = e.account(t, r); res.SessionFound || res.SessionResumed {
+		t.Fatalf("start without a Class = %+v", res)
+	}
+	// Start でも作り直す（開始の時刻は今）。刻印がなければテナント 0 のまま作る。
+	r = e.rec(KindStart, 0, 0, 0)
+	r.SeenKey, r.SessionID, r.UserNameIMSI, r.StampTenant = SeenKey("192.0.2.1", "ap-1", "acct-5"), "s12", testIMSI, 0
+	if res = e.account(t, r); !res.SessionResumed || res.TenantID != 0 {
+		t.Fatalf("start resume = %+v", res)
+	}
+	if got, _, _ = e.sess.ListByIMSIs(ctx, []string{testIMSI}, 0, 10, e.now); len(got) != 1 || got[0].ID != "s12" || got[0].StartTime.Unix() != e.now.Unix() {
+		t.Errorf("sessions after the start resume = %+v", got)
+	}
+}

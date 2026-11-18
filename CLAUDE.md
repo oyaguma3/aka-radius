@@ -9,6 +9,7 @@
 - 段階 2-5 は済み: 管理API の `/clients`・`/sources`（2.0.0 にした）、RADIUS クライアント（`internal/clients`。`client:{ip}` と索引 `clients`）、運用のコマンド（`cmd/aka-radius` の `client`・`sources check`・`admin-cert`・`fingerprint`・`healthcheck`）、管理クライアントのピンのファイル `RADIUS_ADMIN_CLIENTS_FILE` と `SIGHUP`（ピン・サーバー証明書・登録簿）、監査ログ `internal/audit`（Stream と日ごとのファイル）、ループバックの healthcheck の口（`internal/health`、`127.0.0.1:9090`）、遮断器の状態の報告（auth が `stat:sources` に書く）、distroless のイメージ（UID 65532）、admin の profile をなくした、共有ネットワーク `aka-radius-admin`。決めたことは設計概要 §17.1 の「段階 2-5 で決めたこと」（K1〜K15）。
 - 手元の compose で試すときは `docker compose -p <名前>` でプロジェクト名を変える（ディレクトリの名前 `deployments` のままだと、手元に残っている既存のボリューム `deployments_valkey_data`（もとの PoC と前の試しのデータ）を使ってしまう。2026-10-28 に分かった）。
 - 段階 2-6 は済み: 運用ガイド `docs/operation-guide.md`、README を絞った、小さなコードの直し（`RADIUS_UDP_BIND`、`maxmemory 1gb`、`scripts/` のバックアップと戻し、lnav の書式、`ADMIN_CLIENT_REJECTED`）、RADIUS のライブラリの重複の判定に再送を捨てさせない直し（M11）、検証機の通し（aka-mvpset の `verify/stage2/`、29/29）、D-文書の改版と廃止（残すのは D-01・02・04・06・08・09・10・13、E-01・02、T-01、O-05、S-01 と一覧。廃止した文書は一覧の「廃止した文書」）。決めたことは設計概要 §17.1 の「段階 2-6 で決めたこと」（M1〜M11）。
+- 段階 6-5 は済み（2026-11-18）: Accounting の Start・Interim で Class のセッションがなく IMSI が分かれば、記録の Lua の中でセッションを作り直す（`ACCT_SESSION_RESUMED`、INFO）。運用ガイド 3 章に HUP の後の注記。決めたことは設計概要 §17.1 の「段階 6-5 で決めたこと」（aka-mvpset の確認事項 C6-4・C6-6）。
 - 文書の正: 今の作りの細部はコード・OpenAPI（`docs/openapi/admin-api.yaml`）・運用ガイド・改版した D-文書。設計概要は決定事項と段階の記録。D-文書はコードの写し（compose の全文、構造体の定義、試験の一覧など）を持たない。
 EAP-AKA/AKA' の RADIUS サーバー。Wi-Fi認証（WPA2/WPA3-Enterprise）向け。RADIUS認証機能・課金機能と管理API を持つ。
 
