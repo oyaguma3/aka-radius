@@ -77,6 +77,8 @@ type Result struct {
 	CounterReset bool
 	// SessionFound は Class のセッションがあったこと
 	SessionFound bool
+	// SessionResumed は、Class のセッションがなかったので作り直したこと（Start・Interim で、IMSI が分かるとき。段階 6-5 の C6-4）
+	SessionResumed bool
 	// UsageWritten は集計に足し込んだこと
 	UsageWritten bool
 }
@@ -90,7 +92,11 @@ type Result struct {
 // 13 Calling-Station-Id、14 Framed-IP、15 Acct-Session-Id、16 重複の判定の期限（秒）、17 セッションがあるか、
 // 18 集計のキーの接頭辞、19 集計の索引の接頭辞、20 セッションの IMSI の索引の接頭辞、21 テナントの索引の接頭辞、22 セッションの ID
 //
-// 戻り値: {重複, 順序の誤り, IMSI, テナント, 時間の増分, 受信の増分, 送信の増分, 累計の減少, テナントの出どころ, セッションあり, 集計あり}
+// Start・Interim で Class のセッションがなく（Access-Accept を経ないつなぎ直し、期限切れなど）、IMSI が分かれば、セッションを作り直す
+// （開始の時刻は今から Acct-Session-Time を引いた時刻。段階 6-5 の C6-4）。
+//
+// 戻り値: {重複, 順序の誤り, IMSI, テナント, 時間の増分, 受信の増分, 送信の増分, 累計の減少, テナントの出どころ, セッションあり, 集計あり,
+// 作り直した}
 var accountScript = redis.NewScript(`
 local function nz(v) if v and v ~= '' then return v end return nil end
 local typ = ARGV[1]
@@ -100,14 +106,14 @@ local last = seen[1] or ''
 local prev = {tonumber(seen[2]) or 0, tonumber(seen[3]) or 0, tonumber(seen[4]) or 0}
 local dup, seq = 0, ''
 if typ == 'start' then
-  if last == 'start' or last == 'interim' then return {1, '', '', '', 0, 0, 0, 0, '', 0, 0} end
+  if last == 'start' or last == 'interim' then return {1, '', '', '', 0, 0, 0, 0, '', 0, 0, 0} end
   if last == 'stop' then seq = 'start_after_stop' end
   prev = {0, 0, 0}
 elseif typ == 'interim' then
   if last == '' then seq = 'no_start_received' elseif last == 'stop' then seq = 'interim_after_stop' end
   if last == 'interim' and cur[1] == prev[1] and cur[2] == prev[2] and cur[3] == prev[3] then dup = 1 end
 else
-  if last == 'stop' then return {1, '', '', '', 0, 0, 0, 0, '', 0, 0} end
+  if last == 'stop' then return {1, '', '', '', 0, 0, 0, 0, '', 0, 0, 0} end
   if last == '' then seq = 'no_start_received' end
 end
 
@@ -121,6 +127,12 @@ local tenant, tsrc = '0', 'none'
 if nz(ARGV[5]) then tenant, tsrc = ARGV[5], 'stamp'
 elseif nz(seen[6]) and seen[6] ~= '0' then tenant, tsrc = seen[6], 'seen'
 elseif sTenant and sTenant ~= '0' then tenant, tsrc = sTenant, 'session' end
+
+local found, resumed = hasSess, 0
+if ARGV[17] == '1' and hasSess == 0 and typ ~= 'stop' and imsi ~= '' then
+  redis.call('HSET', KEYS[2], 'imsi', imsi, 'tenant_id', tenant)
+  hasSess, sImsi, sTenant, resumed = 1, imsi, tenant, 1
+end
 
 local d, reset = {0, 0, 0}, 0
 for i = 1, 3 do
@@ -159,13 +171,17 @@ if hasSess == 1 then
     redis.call('HSET', KEYS[2], 'nas_ip', ARGV[11], 'nas_identifier', ARGV[12], 'calling_station_id', ARGV[13],
       'client_ip', ARGV[14], 'acct_id', ARGV[15], 'last_update', ARGV[7], 'seconds', string.format('%d', cur[1]),
       'input_octets', string.format('%d', cur[2]), 'output_octets', string.format('%d', cur[3]))
-    if typ == 'start' then redis.call('HSET', KEYS[2], 'start_time', ARGV[7]) end
+    if resumed == 1 then
+      local st = tonumber(ARGV[7]) - cur[1]
+      if st < 0 then st = 0 end
+      redis.call('HSET', KEYS[2], 'start_time', string.format('%d', st))
+    elseif typ == 'start' then redis.call('HSET', KEYS[2], 'start_time', ARGV[7]) end
     redis.call('EXPIREAT', KEYS[2], ARGV[8])
     if sImsi then redis.call('ZADD', ARGV[20] .. sImsi, ARGV[8], id) end
     if sTenant then redis.call('ZADD', ARGV[21] .. sTenant, ARGV[8], id) end
   end
 end
-return {dup, seq, imsi, tenant, d[1], d[2], d[3], reset, tsrc, hasSess, written}
+return {dup, seq, imsi, tenant, d[1], d[2], d[3], reset, tsrc, found, written, resumed}
 `)
 
 // RecordStore は Accounting の記録。
@@ -204,23 +220,24 @@ func (s *RecordStore) Account(ctx context.Context, r Record) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("account: %w", err)
 	}
-	if len(res) != 11 {
+	if len(res) != 12 {
 		return Result{}, fmt.Errorf("account: unexpected result %v", res)
 	}
 	i := func(n int) int64 { v, _ := res[n].(int64); return v }
 	str := func(n int) string { v, _ := res[n].(string); return v }
 	tenant, _ := strconv.ParseInt(str(3), 10, 64)
 	return Result{
-		Duplicate:    i(0) == 1,
-		Sequence:     str(1),
-		IMSI:         str(2),
-		TenantID:     tenant,
-		Seconds:      i(4),
-		InOctets:     i(5),
-		OutOctets:    i(6),
-		CounterReset: i(7) == 1,
-		TenantSource: str(8),
-		SessionFound: i(9) == 1,
-		UsageWritten: i(10) == 1,
+		Duplicate:      i(0) == 1,
+		Sequence:       str(1),
+		IMSI:           str(2),
+		TenantID:       tenant,
+		Seconds:        i(4),
+		InOctets:       i(5),
+		OutOctets:      i(6),
+		CounterReset:   i(7) == 1,
+		TenantSource:   str(8),
+		SessionFound:   i(9) == 1,
+		UsageWritten:   i(10) == 1,
+		SessionResumed: i(11) == 1,
 	}, nil
 }

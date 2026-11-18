@@ -128,6 +128,8 @@ func TestProcess_ResultLogs(t *testing.T) {
 		{"順序の誤りと累計の減少", radius.AcctStatusTypeInterim,
 			store.Result{IMSI: "440100123456789", TenantSource: "seen", Sequence: "no_start_received", CounterReset: true},
 			[]string{"ACCT_SEQUENCE_ERR", "no_start_received", "USAGE_COUNTER_RESET", "ACCT_SESSION_NOT_FOUND", `"ACCT_INTERIM"`}, []string{"ACCT_TENANT_UNKNOWN"}},
+		{"セッションを作り直した", radius.AcctStatusTypeInterim, store.Result{IMSI: "440100123456789", TenantID: 42, TenantSource: "stamp", SessionResumed: true},
+			[]string{"ACCT_SESSION_RESUMED", `"level":"INFO"`, `"ACCT_INTERIM"`}, []string{"ACCT_SESSION_NOT_FOUND", `"level":"WARN"`}},
 		{"IMSI が分からない", radius.AcctStatusTypeStop, store.Result{TenantSource: "none", SessionFound: true},
 			[]string{"ACCT_IMSI_UNKNOWN", `"ACCT_STOP"`}, []string{"ACCT_TENANT_UNKNOWN"}},
 	}
