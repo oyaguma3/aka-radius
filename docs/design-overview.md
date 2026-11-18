@@ -9,7 +9,7 @@
   - 認証ベクターAPI の契約（以下「契約」）: [av-api-contract.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/av-api-contract.md)。とくに §16.2（aka-radius の改修 R1〜R7）
   - 課金レコード: [charging-records.md](https://github.com/oyaguma3/aka-mvpset/blob/main/docs/charging-records.md) §5.2・§8.1（利用の集計）
   - aka-vecgen の設計概要: aka-vecgen の [`docs/design-overview.md`](https://github.com/oyaguma3/aka-vecgen/blob/main/docs/design-overview.md)（状態の値と口、管理クライアントのピン、監査ログの書き出しをそろえる）
-  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r73.md)）
+  - 本PoC: D-01（設計仕様書）、D-02（Valkey のデータ）、D-04（ログ）、D-08（インフラと運用）、D-09（auth-server）、D-10（acct-server）、D-12（vector-gateway）、D-13（Provisioning API 0.4.0）。段階 2-6 で改版・廃止した（§17.2。今の文書は[ドキュメント一覧](aka-radius_ドキュメント一覧_r74.md)）
 
 ## 1. 位置づけ
 
@@ -222,7 +222,7 @@
 
 - Accept のときに `sess:{uuid}` を作り、Class に UUID を入れる。Accounting-Start・Interim では Class でセッションを引き、項目と期限を更新する。Stop で消す。
 - 索引 `idx:sess:imsi:` と `idx:sess:tenant:` のスコアは期限の時刻にし、更新のたびに延ばす。読むときと 1 時間ごとの処理で、期限を過ぎたものを消す（本PoC は Stop が届かなかった分の索引が残り続けた）。
-- Class がない・セッションが消えている Accounting は、User-Name の IMSI と刻印のテナントで利用の集計だけを行う（セッションは作らない。本PoC と同じく `ACCT_SESSION_NOT_FOUND` をログに出す）。
+- Class がない・セッションが消えている Accounting は、User-Name の IMSI と刻印のテナントで利用の集計だけを行う（本PoC と同じく `ACCT_SESSION_NOT_FOUND` をログに出す）。**段階 6-5 で改めた**: Class があってセッションが消えているとき、Start・Interim で IMSI が分かればセッションを作り直す（`ACCT_SESSION_RESUMED`。§17.1 の「段階 6-5 で決めたこと」）。
 - セッションの開始の時刻の索引は、20,000 件で一覧の時間を測ってから決める（概要 §19 の 5）。
 
 ### 10.2 利用の集計（課金レコード §5.2）
@@ -338,6 +338,7 @@
 | 2-4 | Accounting の作り直し（セッションの索引、増分、Gigawords、利用の集計）、`/sessions` と `/usage` の口 | 単体、結合。**済み（2026-10-28）**: 下の「段階 2-4 で決めたこと」 |
 | 2-5 | 管理API 2.0.0 の残り（RADIUS クライアントと取得先の読み出し）、コマンド、ピンのファイル、監査ログの書き出し、healthcheck、共有のネットワークの名前 `eapaka-prov` を決め直す | 結合。**済み（2026-10-28）**: 下の「段階 2-5 で決めたこと」 |
 | 2-6 | D-文書の改版、運用ガイド、README | 検証機で全体を通す（刻印はエッジの代わりの radsecproxy で付け、Accounting は radclient で送る）。**済み（2026-10-29）**: 下の「段階 2-6 で決めたこと」 |
+| 6-5 | aka-mvpset の受入試験の予行で分かったことの直し（Accounting のセッションの作り直し、運用ガイドの HUP の注記） | 単体、結合（miniredis）、本物の Valkey 9.1.2。**済み（2026-11-18）**: 下の「段階 6-5 で決めたこと」 |
 
 - 手順の組み替え（2026-10-27。aka-mvpset の概要 §18.5 の H3）: データの形と、それを読み書きする口は同じ手順で変える（管理API の加入者の口を 2-3 に、`/sessions`・`/usage` を 2-4 に移した）。
 - 2-1・2-2 は aka-vecgen の 2-1 の後に行う（概要 §18.5 の H1）。
@@ -410,6 +411,13 @@
 - M11: §17.1 の K16 の行に書いたとおり（RADIUS のライブラリの重複の判定に再送を捨てさせない）。
 - N1（2-6 の途中で見つけた）: 固定の時刻で期限（EXPIREAT）を付ける試験が、miniredis の時計が実際の時刻のままのため、日付が進むと落ちた（acct の記録の 3 件は 2026-10-29 から）。試験で miniredis の時計を同じ時刻に合わせた（#12）。
 - N2（2-6 で見つけ、段階 3 の始めに直した）: admin が起動のときに Valkey に届かないときのログにも `VALKEY_CONN_ERR` を付けた。lnav の書式の項目を今のログに合わせた（ないものを消し、`acct_session_id`・`tenant_source`・`reason`・`rule_index`・`delta_*` を足した）。取得先のクライアントと登録簿の読み込みを `encoding/json/v2` にした（§4。登録簿の知らない項目と後ろに続くデータは、今までどおり誤りにする。取得先の応答の項目の名前は、大文字と小文字を区別して照合するようになった）。
+
+段階 6-5 で決めたこと（2026-11-18。aka-mvpset の確認事項 C6-4・C6-6 は推奨どおりで合意）:
+
+- 背景: aka-mvpset の段階 6-4 の受入試験の予行（業者の AP と実機の端末を一晩つないだ）で、端末が PMKSA のキャッシュでつなぎ直すと、AP は前の Class を付けて Accounting を送るが、Access-Accept がないのでセッションがなく、`ACCT_SESSION_NOT_FOUND`（WARN）が一晩に 163 回出た（利用は集計されていた）。セッションの一覧にもその端末が出なかった。
+- C6-4: Accounting の Start・Interim で、Class があってセッションがなく、IMSI が分かれば（セッション → `acct:seen` → User-Name の順）、記録の Lua の中でセッションを作り直す。`imsi`・`tenant_id` は Accounting で決めた値（テナントは刻印 → `acct:seen` → `0`）、`start_time` は今から Acct-Session-Time を引いた時刻、索引も書く。ログは `ACCT_SESSION_RESUMED`（INFO。`class_uuid`・`imsi`・`tenant_id`）。Class がない・IMSI が分からない・Stop のときは今どおり作らず、`ACCT_SESSION_NOT_FOUND`（WARN）。D-02（r28）・D-04（r41）・D-06（r23）・D-10（r20）・O-05（r29）・ドキュメント一覧（r74）を改版した。
+- C6-6: 運用ガイド 3 章の `SIGHUP` に、送ったコンテナはホストを再起動すると Docker だけでは起き上がらないこと（aka-mvpset の T5-15）と、送った後に `docker compose up -d` で印を消すこと（aka-mvpset の配置では `aka-compose-up.service` が起こす）。
+- 試験: `TestAccount_SessionResumed`（作り直し、開始の時刻、索引、次の Interim は作り直さない、Stop で消す、Stop・IMSI なし・Class なしでは作らない、刻印のない Start）、`TestIntegration_AccountingResumesSession`（RADIUS の受け口から。直す前のコードで落ちることを確かめた）、`TestProcess_ResultLogs`（INFO と WARN の出し分け）。Lua は本物の Valkey 9.1.2 でも同じに動くことを手元で確かめた。
 
 ### 17.2 D-文書の扱い（S4。段階 2-6 の M2 で改めた）
 

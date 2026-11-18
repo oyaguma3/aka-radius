@@ -1,4 +1,4 @@
-# D-02 Valkey データ設計仕様書 (r27)
+# D-02 Valkey データ設計仕様書 (r28)
 
 - 対象: aka-radius が Valkey に置くデータ（キー、型、期限、項目、だれが書き・読むか、原子性）。
 - 正: コード（下の表の「コード」の列）と設計概要 `docs/design-overview.md` §6。本書はその要約で、食い違えばコードを正とする。
@@ -146,14 +146,14 @@ EAP の会話（Access-Request の往復）の間、状態とベクターから�
 
 ### 4.2 セッション `sess:{uuid}` と索引
 
-Access-Accept のときに auth が作り、Class 属性に UUID を入れる。acct が Accounting で更新し、Stop で消す。
+Access-Accept のときに auth が作り、Class 属性に UUID を入れる。acct が Accounting で更新し、Stop で消す。Class のセッションがないときは、acct が Start・Interim で作り直すことがある（下の注記）。
 
 | 項目 | 書く時 | 内容 |
 |---|---|---|
-| `imsi`、`tenant_id` | Accept | IMSI と刻印のテナント |
+| `imsi`、`tenant_id` | Accept（作り直しでは Start・Interim） | IMSI と刻印のテナント |
 | `nas_ip` | Accept、Start・Interim | 送信元（エッジのトンネルの IP） |
 | `nas_identifier` | Accept、Start・Interim | AP の NAS-Identifier（エッジの奥の AP を見分ける） |
-| `start_time` | Accept、Start | 開始の時刻（Unix 秒） |
+| `start_time` | Accept、Start（作り直しでは今から Acct-Session-Time を引いた時刻） | 開始の時刻（Unix 秒） |
 | `last_update` | Accept、Start・Interim | 最後に更新した時刻 |
 | `calling_station_id`、`client_ip`、`acct_id` | Start・Interim | Calling-Station-Id、Framed-IP-Address、Acct-Session-Id |
 | `seconds`、`input_octets`、`output_octets` | Start・Interim | Accounting の最後の累計（Gigawords を含む。表示用） |
@@ -161,7 +161,7 @@ Access-Accept のときに auth が作り、Class 属性に UUID を入れる。
 - 期限は 24 時間で、Start・Interim のたびに延ばす。
 - 索引 `idx:sess:imsi:{imsi}`・`idx:sess:tenant:{tenantId}` のメンバーはセッションの UUID、スコアはセッションの期限の時刻（Unix 秒）。auth の作成は `MULTI` で `sess:` と両方の索引を書き、acct の更新・削除は §4.3 の Lua の中で索引も直す。
 - 期限を過ぎた索引のメンバーは、管理API が読むとき（`ZREMRANGEBYSCORE`）と、acct の起動のときと 1 時間ごとの掃除で消す。掃除はテナントの索引のメンバーを数えて `stat:sessions`（`count`、`counted_at`）に書く（`/status` の `sessionCount`）。メンバーがなくなった索引は Valkey が消す。
-- Class のない・セッションの消えた Accounting では、セッションを作らない（利用の集計だけを行う。D-10）。
+- Class のセッションが消えていて（Access-Accept を経ないつなぎ直し、期限切れ、auth の作成の失敗）、Start・Interim で IMSI が分かれば、acct が §4.3 の Lua の中でセッションを作り直す（`imsi`・`tenant_id` は Accounting で決めた値、索引も書く。段階 6-5）。Class がない・IMSI が分からない・Stop のときは作らない（利用の集計だけを行う。D-10）。
 - 本PoC の `idx:user:{imsi}`（期限も掃除もない Set）はなくした。
 
 ### 4.3 Accounting の重複の判定 `acct:seen:…`
@@ -181,7 +181,7 @@ Access-Accept のときに auth が作り、Class 属性に UUID を入れる。
 3. 今回の累計から前回の累計を引いて増分を出す（減っていれば今回の値をそのまま増分にする）。
 4. 重複でなく、IMSI と日が決まれば、利用の集計（§4.4）に足し込み、索引に足す。
 5. `acct:seen` の累計・種類・IMSI・テナントを書き、期限を 24 時間に戻す。
-6. セッションがあれば、Start・Interim では項目と期限と索引のスコアを延ばし、Stop ではセッションを消して索引から外す。
+6. セッションがあれば、Start・Interim では項目と期限と索引のスコアを延ばし、Stop ではセッションを消して索引から外す。Class があってセッションがなく、Start・Interim で IMSI が決まれば、セッションを作り直してから同じように書く。
 
 判定の規則と、増分・日の決め方の細部は D-10。累計は Lua の数（倍精度）で扱うので、1 つのセッションで 2^53 まで正確である。
 
@@ -269,3 +269,4 @@ auth のプロセスの中にある取得先ごとの遮断器の状態を、adm
 | r25 | 2026-10-10 | 加入者の停止の印（一時停止・再開）を追加: §2.C の `policy:{IMSI}` にフィールド `status`（`active` / `suspended`。ないときは `active`）を加え、Auth Server の扱い（`suspended` はルールを評価せずに Reject・`AUTH_SUBSCRIBER_SUSPENDED`、不正値は安全側に Reject）と「停止の印」の節（書き込むのは停止・再開の操作だけ、ポリシーの保存・置き換えでは残る、CSV の取り込みの扱い、削除で消える、次の認証から効く、停止中も SQN は進む）を追加。§3 の Auth Server の処理フロー、Admin TUI・Provisioning API の操作（`PolicyStore.SetStatus`、PUT の応答の `status`）、§4 の `pkg/model.Policy` と Auth Server の `Policy` に `Status` を追記 |
 | r26 | 2026-10-12 | PoC セット（eapaka-pocset）の品質改善のステップ 3（Go 1.27.2 への更新とイメージの版の固定）の反映: 接続方式の Valkey コンテナのイメージを `valkey/valkey:9.0` → `valkey/valkey:9.1.2` に |
 | r27 | 2026-10-29 | MVP の段階 2-6 で改版（設計概要 §17.2）: MVP の作りに合わせて全面的に書き直した。キーの一覧を設計概要 §6.1 とコードに合わせ（`sub:` を状態・取得先・ルールに、`policy:`・`idx:user:`・`idx:client:`・`seq:client`・`audit:prov` をなくし、`subs`・`cnt:src:`・`clients`・`idx:sess:imsi:`・`idx:sess:tenant:`・`stat:sessions`・`stat:sources`・`usage:`・`usage:idx:`・`audit` を足した）、キーごとに書く・読むコンテナと原子性（Lua・MULTI）を書いた。`acct:seen:` を NAS ごとの Hash（前回の累計を持つ）に、`eap:` に取得先・テナント・ルール・Identity の項目を、`sess:` にテナントと累計を足した。Valkey の `maxmemory` を 1 GB にし、メモリーの見積もりを書いた。Go の構造体の写しと、Admin TUI・Provisioning API・Vector Gateway のアクセスの流れを削った |
+| r28 | 2026-11-18 | MVP セットの段階 6-5 の Accounting のセッションの作り直し（aka-mvpset の確認事項 C6-4。受入試験の予行で、PMKSA のキャッシュのつなぎ直しのように Access-Accept を経ない Accounting が `ACCT_SESSION_NOT_FOUND`（WARN）を出し続けたため）の反映: §4.2 にセッションの作り直し（Start・Interim で、Class のセッションがなく IMSI が分かるとき。`imsi`・`tenant_id`・`start_time` の書く時）、§4.3 の手順 6 |
