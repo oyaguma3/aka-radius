@@ -1,6 +1,7 @@
 package acct
 
 import (
+	"cmp"
 	"context"
 	"crypto/md5"
 	"encoding/binary"
@@ -73,6 +74,8 @@ type acctReq struct {
 	class           string
 	stamp           string
 	event           time.Time
+	// user は User-Name（空なら匿名の外側の名前）
+	user string
 }
 
 // send は Accounting-Request を作って送り、応答（なければ nil）を返す。raw に符号化した要求を返す（再送の試験用）。
@@ -84,7 +87,7 @@ func (e *itEnv) send(t *testing.T, r acctReq) (*radius.Packet, []byte) {
 	p.Add(radius.Type(radiuspkg.AttrTypeAcctStatusType), u32(r.status))
 	p.Add(radius.Type(radiuspkg.AttrTypeAcctSessionID), []byte("acct-1"))
 	p.Add(radius.Type(radiuspkg.AttrTypeNASIdentifier), []byte("tenant42-ap-01"))
-	p.Add(radius.Type(radiuspkg.AttrTypeUserName), []byte("anonymous@realm"))
+	p.Add(radius.Type(radiuspkg.AttrTypeUserName), []byte(cmp.Or(r.user, "anonymous@realm")))
 	p.Add(radius.Type(radiuspkg.AttrTypeAcctSessionTime), u32(r.sessionTime))
 	p.Add(radius.Type(radiuspkg.AttrTypeAcctInputOct), u32(r.in))
 	p.Add(radius.Type(radiuspkg.AttrTypeAcctInputGiga), u32(r.inGiga))
@@ -193,6 +196,30 @@ func TestIntegration_AccountingWithoutSession(t *testing.T) {
 	env2.send(t, acctReq{status: radiuspkg.AcctStatusTypeInterim, class: class, sessionTime: 30, event: yesterday})
 	// 刻印がなければセッションのテナント
 	if u := env2.usage(t, usage.Day(yesterday), 7); u["seconds"] != "30" {
+		t.Errorf("usage = %v", u)
+	}
+}
+
+// Class のセッションがない Accounting（Access-Accept を経ないつなぎ直し）は、User-Name の IMSI でセッションを作り直し、
+// Stop で消す（段階 6-5 の C6-4）。
+func TestIntegration_AccountingResumesSession(t *testing.T) {
+	env := startAcct(t)
+	class := "33333333-3333-3333-3333-333333333333"
+	user := "0" + itIMSI + "@wlan.mnc010.mcc440.3gppnetwork.org"
+	if resp, _ := env.send(t, acctReq{status: radiuspkg.AcctStatusTypeInterim, class: class, stamp: "42", sessionTime: 120, user: user}); resp == nil {
+		t.Fatal("no response")
+	}
+	if f, err := env.mr.HKeys(sessions.Key(class)); err != nil || env.mr.HGet(sessions.Key(class), "imsi") != itIMSI || env.mr.HGet(sessions.Key(class), "tenant_id") != "42" {
+		t.Fatalf("resumed session = %v, %v", f, err)
+	}
+	if !env.mr.Exists(sessions.IMSIIndexKey(itIMSI)) || !env.mr.Exists(sessions.TenantIndexKey(42)) {
+		t.Errorf("indexes = %v", env.mr.Keys())
+	}
+	env.send(t, acctReq{status: radiuspkg.AcctStatusTypeStop, class: class, stamp: "42", sessionTime: 180, user: user})
+	if env.mr.Exists(sessions.Key(class)) {
+		t.Error("session remains after stop")
+	}
+	if u := env.usage(t, usage.Day(time.Now()), 42); u["seconds"] != "180" {
 		t.Errorf("usage = %v", u)
 	}
 }

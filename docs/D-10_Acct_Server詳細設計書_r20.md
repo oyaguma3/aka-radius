@@ -1,4 +1,4 @@
-# D-10 Acct Server詳細設計書 (r19)
+# D-10 Acct Server詳細設計書 (r20)
 
 ## 1. 概要
 
@@ -182,7 +182,7 @@ auth と共通の `radiussrv.Guard` が、ハンドラーの前で受け持つ�
 | キー | 読み書き | 内容 |
 |---|---|---|
 | `acct:seen:{送信元の IP}:{NAS}:{Acct-Session-Id}` | 読む・書く | Hash。`last`（`start` / `interim` / `stop`）、`sec`・`in`・`out`（前回の累計）、`imsi`、`tenant`。24 時間（受けるたびに延ばす） |
-| `sess:{uuid}` | 読む・書く・消す | auth が作ったセッション。acct は作らない |
+| `sess:{uuid}` | 読む・書く・消す | auth が作ったセッション。消えていれば、Start・Interim で作り直すことがある（§5.8） |
 | `idx:sess:imsi:{imsi}`・`idx:sess:tenant:{id}` | 書く・消す | セッションの索引（Sorted Set。スコアは期限の時刻） |
 | `usage:{yyyymmdd}:{tenantId}:{imsi}` | 足す | 利用の集計（Hash） |
 | `usage:idx:{yyyymmdd}` | 足す | その日の集計の索引（Sorted Set。メンバーは `{tenantId}:{imsi}`） |
@@ -265,10 +265,11 @@ IMSI:
 
 ### 5.8 セッションと索引
 
-- Class の UUID で `sess:{uuid}` を引く。セッションは auth が Access-Accept で作り（D-09）、acct は作らない。
+- Class の UUID で `sess:{uuid}` を引く。セッションは auth が Access-Accept で作る（D-09）。
 - Start・Interim: `nas_ip`（送信元）、`nas_identifier`、`calling_station_id`、`client_ip`（Framed-IP-Address）、`acct_id`、`last_update` と最後の累計（`seconds`・`input_octets`・`output_octets`。表示用）を書き、Start では `start_time` も書く。期限を受けた時刻から 24 時間に延ばし、IMSI とテナントの索引のスコアも同じ期限にする。
 - Stop: セッションを消し、索引から外す。
-- Class がない、またはセッションが消えている（期限切れ、auth の作成の失敗）ときは、利用の集計と重複の判定のキーだけを更新し、`ACCT_SESSION_NOT_FOUND`（WARN）を出す。
+- Class があってセッションが消えている（Access-Accept を経ないつなぎ直し、期限切れ、auth の作成の失敗）とき、Start・Interim で IMSI が決まれば（§5.5 の順。セッション → `acct:seen` → User-Name）、同じ Lua の中でセッションを作り直す（段階 6-5。aka-mvpset の確認事項 C6-4）。`imsi`・`tenant_id` は Accounting で決めた値（テナントは刻印 → `acct:seen` → `0`）、`start_time` は今から Acct-Session-Time を引いた時刻にし、その後は Start・Interim と同じように項目・期限・索引を書く。`ACCT_SESSION_RESUMED`（INFO）を出す。端末が PMKSA のキャッシュでつなぎ直すと、AP は前の Class を付けて Accounting を送るが、Access-Accept がないのでセッションはない（受入試験の予行で、一晩に 163 回 `ACCT_SESSION_NOT_FOUND` が出た）。
+- Class がない、IMSI が分からない、Stop のときは、セッションを作らず、利用の集計と重複の判定のキーだけを更新し、`ACCT_SESSION_NOT_FOUND`（WARN）を出す。
 - 期限切れの索引は、admin が読むときと acct の定期の掃除（§6）で消す。
 
 ### 5.9 Accounting-On / Off
@@ -321,7 +322,8 @@ JSON（1 行に 1 つ）で標準出力に出し、`app` は `acct`。項目と�
 | `ACCT_DUPLICATE_START`・`ACCT_DUPLICATE_INTERIM` | WARN | 重複（§5.3） |
 | `ACCT_DUPLICATE_STOP` | DEBUG | Stop の後の Stop |
 | `ACCT_SEQUENCE_ERR` | WARN | 順序の誤り（`reason`） |
-| `ACCT_SESSION_NOT_FOUND` | WARN | Class がない、セッションがない（集計だけ） |
+| `ACCT_SESSION_RESUMED` | INFO | Class のセッションがなかったので作り直した（§5.8） |
+| `ACCT_SESSION_NOT_FOUND` | WARN | Class がない、セッションがなく作り直せない（集計だけ） |
 | `ACCT_TENANT_UNKNOWN`・`ACCT_IMSI_UNKNOWN` | WARN | テナント `0` で集計した・集計しなかった |
 | `ACCT_STAMP_MULTIPLE`・`ACCT_STAMP_INVALID` | WARN | 刻印を使わなかった |
 | `ACCT_STAMP_LOOKUP_ERR` | ERROR | 刻印の信頼の印を読めなかった |
@@ -389,3 +391,4 @@ JSON（1 行に 1 つ）で標準出力に出し、`app` は `acct`。項目と�
 | r17 | 2026-10-12 | PoC セット（eapaka-pocset）の品質改善のステップ 6（文書の整理）の反映: §1.3 の関連ドキュメントの表から、他の文書の版数を外した（10 か所。今の版はドキュメント一覧で分かるため、参照に版を書かない） |
 | r18 | 2026-10-23 | PoC セット（eapaka-pocset）の pocset-v1.0.1（Go 1.27.3 への更新。crypto/x509 の CVE-2026-111943（GO-2026-6809）の修正）の反映: Dockerfile 方針のビルドのイメージを実ファイルに同期（§2.5.1 の Dockerfile の例と §2.5.2 のベースイメージ選定の表を `golang:1.27.2-bookworm` → `golang:1.27.3-bookworm`（Go 1.27.3）に） |
 | r19 | 2026-10-29 | MVP の段階 2-6 で改版（設計概要 §17.2）: 全面的に書き直した。§5 を、1 つの Lua（`internal/acct/store` の `accountScript`）による重複と順序の判定・前回の累計からの増分（Gigawords）・利用の集計への足し込み・セッションと索引の更新、重複の判定のキー `acct:seen:{送信元}:{NAS}:{Acct-Session-Id}`、テナントと IMSI の決め方、Event-Timestamp による日の割り当て、記録できないときは応答しないこと、Accounting-On/Off に作り直した。重複応答のキャッシュ・要求の期限・同時処理の上限（`radiussrv.Guard`）と受けたパケットの goroutine への受け渡し（§4.4）、セッションの索引の掃除（§6）を足した。環境変数を `RADIUS_` に改め、パッケージ構成・設定構造体・Dockerfile・ハンドラーや起動の処理などのコードの写しを要約にした。D-03・D-11・E-03 への参照を外した |
+| r20 | 2026-11-18 | MVP セットの段階 6-5 の Accounting のセッションの作り直し（aka-mvpset の確認事項 C6-4。受入試験の予行で、PMKSA のキャッシュのつなぎ直しのように Access-Accept を経ない Accounting が `ACCT_SESSION_NOT_FOUND`（WARN）を出し続けたため）の反映: §5.2 の `sess:` の行、§5.8 にセッションの作り直し（Start・Interim で、Class のセッションがなく IMSI が分かるとき）、§8.1 に `ACCT_SESSION_RESUMED` |
